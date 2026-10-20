@@ -7,6 +7,7 @@
  *   └── objectGroup (rotation = user Euler)
  *       └── modelFrameGroup (position = −centroid when display.center; never rotated)
  *           ├── Points per channel (raw pos)
+ *           ├── edges per 2D-edge channel ("Display as: Edges", raw pos)
  *           ├── normals (optional, raw pos)
  *           ├── selection ring + pose glyph (raw node pos)
  *           └── overlayGroup (identity; Phase 4 overlays)
@@ -20,9 +21,11 @@ import { getGraph, useViewerStore, type Tool, type ViewerState } from '../state/
 import { readToken } from '../theme/readToken';
 import { displayName } from '../util/displayName';
 import { computeColoring, cssToRgb, readThemeColors, type ThemeColors } from './colors';
+import { EdgeLayer } from './EdgeLayer';
 import { buildLmTriad, buildRingMarker, buildSmGlyph, disposeObject } from './Glyphs';
 import { NormalsLayer } from './NormalsLayer';
 import { Picker, type PickHit } from './Picker';
+import { isEdgeChannel } from '../model/edges';
 import { graphRadius, PointCloudLayer } from './PointCloudLayer';
 import type { ViewerScene } from './sceneRegistry';
 
@@ -100,6 +103,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
   // ---- per-graph state -------------------------------------------------------------------
   let graph: ObjectGraph | undefined;
   let layers: PointCloudLayer[] = [];
+  let edges: EdgeLayer[] = [];
   let normals: NormalsLayer | null = null;
   let R = 0.01;
   let themeColors: ThemeColors = readThemeColors();
@@ -121,18 +125,44 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     if (!graph || !s.model) return;
     const coloring = computeColoring(s.model, graph, s.colorMode, themeColors);
     const sel = s.selection;
+    const bg = cssToRgb(readToken('--viewport'));
     layers.forEach((layer, k) => {
       const cc = coloring.channels[k];
       const dimChannel =
         s.display.dimOthers && sel !== undefined && sel.channel !== layer.channel.channel;
       layer.setColors(cc.colors, cc.dimmed, dimChannel);
+      const e = edges.find((x) => x.channel === layer.channel);
+      if (e) e.setColors(cc.colors, cc.dimmed, dimChannel, bg);
     });
     normals?.setDimmed(s.display.dimOthers ? sel?.channel : undefined);
   }
 
   function applyPointSize() {
-    const px = st().display.pointSize;
-    for (const l of layers) l.setPointSize(px, renderer.getPixelRatio());
+    const d = st().display;
+    for (const l of layers) l.setPointSize(d.pointSize, renderer.getPixelRatio());
+    for (const e of edges) e.setWidth(d.edgeWidthPx);
+  }
+
+  /** "Display as": build/dispose the edge layers and hide the points they replace. */
+  function rebuildEdges() {
+    for (const e of edges) e.dispose();
+    edges = [];
+    const s = st();
+    if (graph && s.display.displayAs === 'edges') {
+      const halfLen = 0.5 * (s.display.edgeLengthPct / 100) * R;
+      for (const c of graph.channels) {
+        if (!isEdgeChannel(c)) continue;
+        const e = new EdgeLayer(c, halfLen);
+        edges.push(e);
+        modelFrameGroup.add(e.lines);
+      }
+    }
+    for (const l of layers) {
+      const e = edges.find((x) => x.channel === l.channel);
+      l.setHidden(e && e.segments.count > 0 ? e.hiddenMask : null);
+    }
+    applyPointSize();
+    recolor();
   }
 
   function applyCenter() {
@@ -211,6 +241,8 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     const s = st();
     for (const l of layers) l.dispose();
     layers = [];
+    for (const e of edges) e.dispose();
+    edges = [];
     normals?.dispose();
     normals = null;
     hover = null;
@@ -228,8 +260,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
       R = 0.01;
     }
     applyCenter();
-    applyPointSize();
-    recolor();
+    rebuildEdges(); // also applies point size and colors
     rebuildNormals();
     rebuildSelection();
     if (s.loadGen !== lastLoadGen) {
@@ -450,13 +481,23 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
         recolor();
       }
       if (s.display.showNormals !== p.display.showNormals) rebuildNormals();
+      if (
+        s.display.displayAs !== p.display.displayAs ||
+        s.display.edgeLengthPct !== p.display.edgeLengthPct
+      ) {
+        rebuildEdges();
+      }
       if (s.display.center !== p.display.center) {
         applyCenter();
         fit();
       }
       if (selChanged) rebuildSelection();
     }
-    if (s.display.pointSize !== p.display.pointSize) applyPointSize();
+    if (
+      s.display.pointSize !== p.display.pointSize ||
+      s.display.edgeWidthPx !== p.display.edgeWidthPx
+    )
+      applyPointSize();
     if (s.objectRotationDeg !== p.objectRotationDeg) applyRotation();
     if (s.tool !== p.tool) applyTool(s.tool);
     if (s.ortho !== p.ortho) applyOrtho();
@@ -591,6 +632,8 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
       controls.dispose();
       for (const l of layers) l.dispose();
       layers = [];
+      for (const e of edges) e.dispose();
+      edges = [];
       normals?.dispose();
       if (selectionGroup) disposeObject(selectionGroup);
       if (hoverMarker) disposeObject(hoverMarker);

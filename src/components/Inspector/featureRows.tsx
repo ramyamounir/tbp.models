@@ -3,6 +3,7 @@
  * return row specs for `Table`.
  */
 import type { ReactNode } from 'react';
+import { isEdgeChannel } from '../../model/edges';
 import type { ChannelGraph } from '../../model/types';
 import { DisplayName } from '../../util/DisplayName';
 import { colorModeForFeature, hsvToRgb, rgbToCss } from '../../viewer/colors';
@@ -18,6 +19,13 @@ export interface RowSpec {
 }
 
 export const name = (n: string) => <DisplayName value={n} max={40} />;
+
+/** Row labels of `pose_vectors`: 2D-edge channels store `[normal, edge_tangent, edge_perp]`. */
+export function poseRowLabels(c: ChannelGraph): [string, string, string] {
+  return isEdgeChannel(c)
+    ? ['normal', 'edge_tangent', 'edge_perp']
+    : ['normal', 'curv_dir_1', 'curv_dir_2'];
+}
 
 /** Generic row for a feature: 1-wide scalar or a vector with per-component click targets. */
 export function genericRow(c: ChannelGraph, i: number, feature: string): RowSpec | null {

@@ -65,6 +65,9 @@ export class PointCloudLayer {
   private readonly geometry: THREE.BufferGeometry;
   private readonly material: THREE.ShaderMaterial;
   private readonly finite: Uint8Array;
+  /** Nodes drawn as edge segments instead ("Display as: Edges"); alpha 0 but still pickable. */
+  private hidden: Uint8Array | null = null;
+  private lastColors: { colors: Float32Array; dimmed: Uint8Array; whole: boolean } | null = null;
 
   constructor(channel: ChannelGraph, centroid: [number, number, number]) {
     this.channel = channel;
@@ -115,14 +118,27 @@ export class PointCloudLayer {
     (color.array as Float32Array).set(colors.subarray(0, n * 3));
     const a = alpha.array as Float32Array;
     const s = size.array as Float32Array;
+    const hidden = this.hidden;
     for (let i = 0; i < n; i++) {
       const dim = dimWholeChannel || dimmed[i] === 1;
-      a[i] = this.finite[i] ? (dim ? DIM_ALPHA : 1) : 0;
+      const shown = this.finite[i] === 1 && !(hidden && hidden[i] === 1);
+      a[i] = shown ? (dim ? DIM_ALPHA : 1) : 0;
       s[i] = dim ? DIM_SIZE : 1;
     }
     color.needsUpdate = true;
     alpha.needsUpdate = true;
     size.needsUpdate = true;
+    this.lastColors = { colors, dimmed, whole: dimWholeChannel };
+  }
+
+  /**
+   * Hide the points of `mask[i] === 1` (their edge segment stands in for them); `null` shows every
+   * finite node again. Hidden nodes stay pickable so clicking an edge's center still selects it.
+   */
+  setHidden(mask: Uint8Array | null): void {
+    this.hidden = mask;
+    const last = this.lastColors;
+    if (last) this.setColors(last.colors, last.dimmed, last.whole);
   }
 
   setPointSize(px: number, pixelRatio: number): void {

@@ -1,7 +1,7 @@
 import type { ChannelGraph } from '../../model/types';
 import { featureValues } from './activeNode';
 import { ColorTarget } from './ColorTarget';
-import { colorRow, genericRow, name, type RowSpec } from './featureRows';
+import { colorRow, genericRow, name, poseRowLabels, type RowSpec } from './featureRows';
 import { fmt, fmtVec, orthoError } from './format';
 
 export function Table({ rows }: { rows: RowSpec[] }) {
@@ -65,11 +65,12 @@ export function OrthoWarning({ row9 }: { row9: ArrayLike<number> }) {
 /** SM-channel feature table (spec Phase 4 "SM feature table"). */
 export function SmFeatureTable({ channel: c, index: i }: { channel: ChannelGraph; index: number }) {
   const rows: RowSpec[] = [];
+  const poseLabels = poseRowLabels(c);
   for (const f of ordered(c, SM_ORDER)) {
     if (f === 'pose_vectors') {
       const v = featureValues(c, i, f)!;
       if (v.length === 9) {
-        ['normal', 'curv_dir_1', 'curv_dir_2'].forEach((label, k) =>
+        poseLabels.forEach((label, k) =>
           rows.push({
             key: `pv${k}`,
             label: (

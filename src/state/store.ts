@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
+import { graphHasEdgeChannel } from '../model/edges';
 import type { ModelFile, ObjectGraph } from '../model/types';
 import {
   isTheme,
@@ -15,11 +16,19 @@ export type ColorMode =
   | { kind: 'channel' }
   | { kind: 'scalar'; feature: string; component: number }; // colors every channel of the graph that has `feature`
 
+/** 'edges': nodes of 2D-edge channels (src/model/edges.ts) are drawn as segments along their edge tangent. */
+export type DisplayAs = 'points' | 'edges';
+
 export interface DisplayOptions {
   pointSize: number;
   showNormals: boolean;
   center: boolean;
   dimOthers: boolean;
+  displayAs: DisplayAs;
+  /** Edge segment length as a percentage of the object bounding-sphere radius `R`. */
+  edgeLengthPct: number;
+  /** Edge segment width in CSS px. */
+  edgeWidthPx: number;
 }
 export type Tool = 'orbit' | 'pan' | 'pick' | 'rotate';
 export type Theme = 'light' | 'dark' | 'system';
@@ -64,10 +73,20 @@ export const DEFAULT_DISPLAY: DisplayOptions = {
   showNormals: false,
   center: true,
   dimOthers: false,
+  displayAs: 'points',
+  edgeLengthPct: 8, // tbp.teleop draws ±0.04 × half-extent, i.e. 8 % of the frame half-size
+  edgeWidthPx: 2,
 };
 
-const POINT_SIZE_MIN = 1;
-const POINT_SIZE_MAX = 8;
+export const POINT_SIZE_MIN = 1;
+export const POINT_SIZE_MAX = 32;
+export const EDGE_LENGTH_MIN = 1;
+export const EDGE_LENGTH_MAX = 30;
+export const EDGE_WIDTH_MIN = 1;
+export const EDGE_WIDTH_MAX = 16;
+
+const clampNum = (v: number, lo: number, hi: number, fallback: number) =>
+  Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
 
 /** Graph `graphId` of LM index `lmId`, or undefined. */
 export function getGraph(
@@ -109,18 +128,27 @@ export function validateColorMode(mode: ColorMode, g: ObjectGraph | undefined): 
   }
 }
 
+/** Graph-change "Display as" validation: 'edges' needs a 2D-edge channel in the new graph. */
+export function validateDisplayAs(mode: DisplayAs, g: ObjectGraph | undefined): DisplayAs {
+  return mode === 'edges' && graphHasEdgeChannel(g) ? 'edges' : 'points';
+}
+
 /** Fields reset whenever the displayed graph changes (setModel / selectGraph). */
 function graphChangeResets(
   model: ModelFile | undefined,
   lmId: number,
   graphId: string | undefined,
   colorMode: ColorMode,
-): Pick<ViewerState, 'selection' | 'activeTab' | 'overlayChild' | 'colorMode'> {
+  display: DisplayOptions,
+): Pick<ViewerState, 'selection' | 'activeTab' | 'overlayChild' | 'colorMode' | 'display'> {
+  const g = getGraph(model, lmId, graphId);
+  const displayAs = validateDisplayAs(display.displayAs, g);
   return {
     selection: undefined,
     activeTab: undefined,
     overlayChild: false,
-    colorMode: validateColorMode(colorMode, getGraph(model, lmId, graphId)),
+    colorMode: validateColorMode(colorMode, g),
+    display: displayAs === display.displayAs ? display : { ...display, displayAs },
   };
 }
 
@@ -160,7 +188,7 @@ export const useViewerStore = create<ViewerState>()(
         loadGen: s.loadGen + 1,
         loading: undefined,
         error: undefined,
-        ...graphChangeResets(model, lmId, graphId, s.colorMode),
+        ...graphChangeResets(model, lmId, graphId, s.colorMode, s.display),
       }));
     },
 
@@ -182,7 +210,7 @@ export const useViewerStore = create<ViewerState>()(
       set({
         lmId,
         graphId,
-        ...graphChangeResets(model, lmId, graphId, s.colorMode),
+        ...graphChangeResets(model, lmId, graphId, s.colorMode, s.display),
       });
     },
 
@@ -197,8 +225,31 @@ export const useViewerStore = create<ViewerState>()(
     setDisplay(patch) {
       set((s) => {
         const display = { ...s.display, ...patch };
-        if (!Number.isFinite(display.pointSize)) display.pointSize = s.display.pointSize;
-        display.pointSize = Math.min(POINT_SIZE_MAX, Math.max(POINT_SIZE_MIN, display.pointSize));
+        display.pointSize = clampNum(
+          display.pointSize,
+          POINT_SIZE_MIN,
+          POINT_SIZE_MAX,
+          s.display.pointSize,
+        );
+        display.edgeLengthPct = clampNum(
+          display.edgeLengthPct,
+          EDGE_LENGTH_MIN,
+          EDGE_LENGTH_MAX,
+          s.display.edgeLengthPct,
+        );
+        display.edgeWidthPx = clampNum(
+          display.edgeWidthPx,
+          EDGE_WIDTH_MIN,
+          EDGE_WIDTH_MAX,
+          s.display.edgeWidthPx,
+        );
+        if (display.displayAs !== 'points' && display.displayAs !== 'edges')
+          display.displayAs = s.display.displayAs;
+        if (
+          display.displayAs === 'edges' &&
+          !graphHasEdgeChannel(getGraph(s.model, s.lmId, s.graphId))
+        )
+          display.displayAs = 'points';
         return { display };
       });
     },

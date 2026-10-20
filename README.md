@@ -19,8 +19,12 @@ receives model data.
    - **Color points by**: All, SM feature (`hsv` / `rgba`), LM feature (`object_id`, with a legend
      that decodes ids to child graph names), Channel source, Scalar feature (any component of any
      mapped feature, viridis).
-   - **Display**: point size, surface normals, center on centroid, dim nodes outside the selected
-     channel.
+   - **Display as**: Points (every node a dot, with the point size slider, 1–32 px) or Edges:
+     nodes of a 2D sensor-module channel are drawn as short segments along their detected edge
+     tangent (the second `pose_vectors` row), the other nodes stay dots; edge length (% of the
+     object radius) and edge width (px) are adjustable. Available when the graph has an SM channel
+     with `edge_strength` / `coherence`.
+   - **Display**: surface normals, center on centroid, dim nodes outside the selected channel.
 4. Click a node to open the **inspector**: one tab per input channel (other channels show the
    nearest node and its distance), a pose glyph whose camera follows the viewport, the feature
    table (click a feature name to color the cloud by it), and for LM-channel nodes the decoded child
@@ -73,6 +77,14 @@ top-left button.
   `location_rel_model` is absent; shown as "approximate placement").
 - Large inline numpy payloads (e.g. `sm_dict[*].raw_observations`) are kept as unread zero-copy
   views of `data.pkl`; the pickle is never executed (closed class table, inert placeholders).
+- **2D sensor modules** (`TwoDSensorModule`, `tbp.monty` `models/two_d_sensor_module.py`): the
+  graph is planar (`pos = [u, v, 0]` in the module's tangent-plane frame) and, when the module
+  extracts `edge_strength` / `coherence`, a node whose patch contains an edge stores
+  `pose_vectors = [normal, edge_tangent, edge_perp]` with `normal = [0, 0, 1]` and
+  `pose_fully_defined = 1`; nodes without an edge keep the curvature pose with
+  `pose_fully_defined = 0`. "Display as: Edges" draws `p ± t̂ · len/2` along that tangent (as
+  `tbp.teleop` `draw_2d_segments` does); the tangent is normalized because voxel averaging can
+  shrink it. The inspector labels these rows `edge_tangent` / `edge_perp`.
 
 ## Development
 
@@ -152,4 +164,5 @@ Best-effort checks from the final implementation phase (2026-10-20).
 | 393 MB file                         | Node + headless Chrome                                                                                                 | 373 ms Node parse, 354 ms Chrome load; no OOM (target < 10 s). Firefox not run                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Serve check                         | `npm run preview`; `python3 -m http.server -b 127.0.0.1 -d dist`; `dist/` copied to `/viewer/` sub-path                | page, every asset, worker chunk and logo return 200 at root and sub-path; a model opens from the sub-path in headless Chrome                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | No-network check                    | headless Chrome via the DevTools protocol, file set with `DOM.setFileInputFiles`                                       | no foreign-origin request; after the initial page load only the worker chunk and a lazily used font file (both same-origin) are requested; no CSP violation; no console errors                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Edges mode                          | headless Chrome on `2d_sensor/learning_2d` (`021_logo_tbp`, 980/1,489 edge nodes) and the `_2d_children_3lm` model     | Edges draws the logo text as segments in light and dark mode with every color mode; Edges is disabled on the 3D `001_cube` graph (LM 0) and enabled on the 2D `021_logo_tbp` (LM 1); switching back to a 3D graph falls back to Points; no console errors                                                                                                                                                                                                                                                                                                                                                                                      |
 | Glyph / inspector check             | headless Chrome screenshots on `002_cube_tbp_horz` (LM 1, logos model)                                                 | SM node: the inspector glyph stays centered and matches the viewport glyph after a horizontal orbit, an over-the-top orbit and the rotate tool; ortho toggle, slider rotation, channel tabs (nearest node + mm), dark mode, breadcrumb pickers, "Open in LM 0 →" and browser Back work. Not checked visually: a full 360° orbit and an LM-node viewport triad                                                                                                                                                                                                                                                                                  |

@@ -14,6 +14,7 @@ import {
   nodePos,
   type ActiveNode,
 } from './activeNode';
+import { poseRowLabels } from './featureRows';
 import { SmFeatureTable } from './FeatureTable';
 import { fmt } from './format';
 import { GlyphView, type GlyphContent } from './GlyphView';
@@ -135,10 +136,11 @@ function SmPanel({ channel: c, index: i }: { channel: ChannelGraph; index: numbe
       fullyDefined: pfd !== undefined && pfd[0] >= 0.5,
     };
   }, [c, i]);
+  const [l0, l1, l2] = poseRowLabels(c);
   const legend: [string, string][] = [
-    ['normal', 'var(--glyph-normal)'],
-    ['curv_dir_1', 'var(--glyph-curv1)'],
-    ['curv_dir_2', 'var(--glyph-curv2)'],
+    [l0, 'var(--glyph-normal)'],
+    [l1, 'var(--glyph-curv1)'],
+    [l2, 'var(--glyph-curv2)'],
   ];
   return (
     <div className="flex flex-col gap-3">

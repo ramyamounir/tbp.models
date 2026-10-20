@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react';
 import { openModelFile } from '../../loader/loadController';
 import { useViewerStore } from '../../state/store';
 import { ColorModePanel } from './ColorModePanel';
+import { DisplayAsPanel } from './DisplayAsPanel';
 import { DisplayOptions } from './DisplayOptions';
 import { DropZone } from './DropZone';
 import { GraphList } from './GraphList';
@@ -105,6 +106,9 @@ export function Sidebar({ open = true }: { open?: boolean }) {
       </SidebarSection>
       <SidebarSection title="Color points by">
         <ColorModePanel />
+      </SidebarSection>
+      <SidebarSection title="Display as">
+        <DisplayAsPanel />
       </SidebarSection>
       <SidebarSection title="Display">
         <DisplayOptions />

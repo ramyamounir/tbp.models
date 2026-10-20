@@ -39,6 +39,16 @@ const twoCh = graph(1, 'cube', [
   }),
 ]);
 
+const edge2d = graph(2, 'logo', [
+  channel('patch_0', 'sm', {
+    pose_vectors: [0, 9],
+    pose_fully_defined: [9, 10],
+    hsv: [18, 21],
+    edge_strength: [23, 24],
+    coherence: [24, 25],
+  }),
+]);
+
 const model: ModelFile = {
   fileName: 'model.pt',
   byteLength: 1,
@@ -53,6 +63,12 @@ const model: ModelFile = {
       lmId: 1,
       graphIds: ['cube'],
       graphs: new Map([['cube', twoCh]]),
+      unreadable: [],
+    },
+    {
+      lmId: 2,
+      graphIds: ['logo'],
+      graphs: new Map([['logo', edge2d]]),
       unreadable: [],
     },
   ],
@@ -77,6 +93,9 @@ describe('store defaults', () => {
       showNormals: false,
       center: true,
       dimOthers: false,
+      displayAs: 'points',
+      edgeLengthPct: 8,
+      edgeWidthPx: 2,
     });
     expect(s.objectRotationDeg).toEqual([0, 0, 0]);
     expect(s.tool).toBe('orbit');
@@ -192,17 +211,42 @@ describe('selection, tabs, display, theme', () => {
     expect(useViewerStore.getState().activeTab).toBeUndefined();
   });
 
-  it('clamps pointSize to 1..8', () => {
+  it('clamps pointSize to 1..32, edgeLengthPct to 1..30 and edgeWidthPx to 1..16', () => {
     const s = useViewerStore.getState();
-    s.setDisplay({ pointSize: 20 });
-    expect(useViewerStore.getState().display.pointSize).toBe(8);
+    s.setDisplay({ pointSize: 50 });
+    expect(useViewerStore.getState().display.pointSize).toBe(32);
     s.setDisplay({ pointSize: 0 });
+    expect(useViewerStore.getState().display.pointSize).toBe(1);
+    s.setDisplay({ pointSize: NaN });
     expect(useViewerStore.getState().display.pointSize).toBe(1);
     s.setDisplay({ showNormals: true });
     expect(useViewerStore.getState().display).toMatchObject({
       pointSize: 1,
       showNormals: true,
     });
+    s.setDisplay({ edgeLengthPct: 100 });
+    expect(useViewerStore.getState().display.edgeLengthPct).toBe(30);
+    s.setDisplay({ edgeLengthPct: -1 });
+    expect(useViewerStore.getState().display.edgeLengthPct).toBe(1);
+    s.setDisplay({ edgeWidthPx: 99 });
+    expect(useViewerStore.getState().display.edgeWidthPx).toBe(16);
+    s.setDisplay({ edgeWidthPx: 0 });
+    expect(useViewerStore.getState().display.edgeWidthPx).toBe(1);
+  });
+
+  it('allows displayAs "edges" only while the graph has a 2D-edge channel', () => {
+    const s = useViewerStore.getState();
+    s.setDisplay({ displayAs: 'edges' }); // no model → no edge channel
+    expect(useViewerStore.getState().display.displayAs).toBe('points');
+    s.setModel(model, 2, 'logo');
+    s.setDisplay({ displayAs: 'edges' });
+    expect(useViewerStore.getState().display.displayAs).toBe('edges');
+    s.setDisplay({ displayAs: 'bogus' as never });
+    expect(useViewerStore.getState().display.displayAs).toBe('edges');
+    s.selectGraph(1, 'cube'); // 3D graph: falls back to points
+    expect(useViewerStore.getState().display.displayAs).toBe('points');
+    s.selectGraph(2, 'logo');
+    expect(useViewerStore.getState().display.displayAs).toBe('points'); // not re-enabled on its own
   });
 
   it('derives resolvedTheme and ignores invalid themes', () => {

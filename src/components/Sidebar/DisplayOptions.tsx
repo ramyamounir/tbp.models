@@ -40,29 +40,13 @@ function Toggle({
   );
 }
 
-/** Point size, surface normals, centering and channel dimming. */
+/** Surface normals, centering and channel dimming (point size lives in "Display as"). */
 export function DisplayOptions() {
   const display = useViewerStore((s) => s.display);
   const setDisplay = useViewerStore((s) => s.setDisplay);
   const set = (patch: Partial<Display>) => setDisplay(patch);
   return (
     <div>
-      <label className="block py-1">
-        <span className="flex items-center justify-between">
-          <span className="text-[13px] text-text">Point size</span>
-          <span className="font-mono text-[12px] text-muted">{display.pointSize} px</span>
-        </span>
-        <input
-          type="range"
-          min={1}
-          max={8}
-          step={1}
-          value={display.pointSize}
-          onChange={(e) => set({ pointSize: Number(e.currentTarget.value) })}
-          className="mt-1 w-full accent-accent"
-          aria-label="Point size (pixels)"
-        />
-      </label>
       <Toggle
         label="Show surface normals"
         checked={display.showNormals}
