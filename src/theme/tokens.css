@@ -1,0 +1,99 @@
+/*
+ * Design tokens (light + dark). The single source of every UI / three.js color.
+ * Components use the Tailwind utilities mapped in src/index.css (`bg-panel`, `text-muted`, …);
+ * three.js / canvas code reads tokens with readToken('--x') (src/theme/readToken.ts).
+ * Never hard-code these values elsewhere.
+ */
+
+:root {
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --viewport: #fbfbfc;
+  --border: #e2e5ea;
+  --text: #16181d;
+  --muted: #6b7280;
+  --faint: #9ca3af;
+  --accent: #2563eb;
+  --accent-bg: #e8effe;
+  --sm: #0891b2;
+  --sm-bg: #e0f4f8;
+  --lm: #9333ea;
+  --lm-bg: #f3e8ff;
+  --select: #f59e0b;
+  --axis-x: #ef4444;
+  --axis-y: #22c55e;
+  --axis-z: #3b82f6;
+  --glyph-normal: #f59e0b;
+  --glyph-curv1: #16a34a;
+  --glyph-curv2: #7c3aed;
+  --brand-blue: #00a0df;
+  --brand-navy: #3b3862;
+  --point-default: #1f2937;
+  --row-alt: #f8f9fb;
+  color-scheme: light;
+}
+
+/* Dark token set. Applied by the store-driven attribute set in ThemeProvider. */
+:root[data-theme='dark'] {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --viewport: #121419;
+  --border: #262b35;
+  --text: #e6e8ee;
+  --muted: #9aa3b2;
+  --faint: #6b7280;
+  --accent: #60a5fa;
+  --accent-bg: #1b2a4a;
+  --sm: #22d3ee;
+  --sm-bg: #0e3a44;
+  --lm: #c084fc;
+  --lm-bg: #3b1d5c;
+  --select: #fbbf24;
+  --axis-x: #ef4444;
+  --axis-y: #22c55e;
+  --axis-z: #3b82f6;
+  --glyph-normal: #fbbf24;
+  --glyph-curv1: #4ade80;
+  --glyph-curv2: #a78bfa;
+  --brand-blue: #00a0df;
+  --brand-navy: #c7c4e8;
+  --point-default: #d1d5db;
+  --row-alt: #1c2029;
+  color-scheme: dark;
+}
+
+/* Pre-JS fallback: before ThemeProvider sets data-theme, follow the OS preference. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --viewport: #121419;
+    --border: #262b35;
+    --text: #e6e8ee;
+    --muted: #9aa3b2;
+    --faint: #6b7280;
+    --accent: #60a5fa;
+    --accent-bg: #1b2a4a;
+    --sm: #22d3ee;
+    --sm-bg: #0e3a44;
+    --lm: #c084fc;
+    --lm-bg: #3b1d5c;
+    --select: #fbbf24;
+    --axis-x: #ef4444;
+    --axis-y: #22c55e;
+    --axis-z: #3b82f6;
+    --glyph-normal: #fbbf24;
+    --glyph-curv1: #4ade80;
+    --glyph-curv2: #a78bfa;
+    --brand-blue: #00a0df;
+    --brand-navy: #c7c4e8;
+    --point-default: #d1d5db;
+    --row-alt: #1c2029;
+    color-scheme: dark;
+  }
+}
+
+/* File-derived names: keep RTL text from reordering surrounding UI (Tailwind's `isolate` is isolation, not this). */
+.bidi-isolate {
+  unicode-bidi: isolate;
+}

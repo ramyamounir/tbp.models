@@ -1,0 +1,45 @@
+@import 'tailwindcss';
+@import './theme/tokens.css'; /* :root / [data-theme="dark"] variables + .bidi-isolate */
+
+/* Dark variant keyed to the store-driven attribute, not the OS media query. Rarely needed:
+   token-based utilities switch automatically because the variables change. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* `inline` makes utilities emit var(--panel) etc. directly, so they follow the theme switch. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-viewport: var(--viewport);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-bg: var(--accent-bg);
+  --color-ch-sm: var(
+    --sm
+  ); /* "ch-" prefix: `--color-sm` would make `text-sm` ambiguous with the font-size utility */
+  --color-ch-sm-bg: var(--sm-bg);
+  --color-ch-lm: var(--lm);
+  --color-ch-lm-bg: var(--lm-bg);
+  --color-select: var(--select);
+  --color-row-alt: var(--row-alt);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-navy: var(--brand-navy);
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
