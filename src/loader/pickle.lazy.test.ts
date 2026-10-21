@@ -88,7 +88,8 @@ describe('large inline payloads', () => {
     const bytes = numpyArrayData(obs as NumpyArray);
     expect(materializeCount).toBe(1);
     expect(bytes).toEqual(bigPayload());
-  });
+    // Builds and parses two 2 MiB pickles: ~4 s locally, slower on CI runners.
+  }, 30_000);
 
   it('(b) latin1FromUtf8 decodes all code points 0..255', () => {
     const all = new Uint8Array(256).map((_, k) => k);
