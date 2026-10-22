@@ -4,7 +4,12 @@
  */
 import { getGraph, useViewerStore, type ViewerState } from './store';
 import { getViewer } from '../viewer/sceneRegistry';
-import { activeNode, findChannel, tabOrder } from '../components/Inspector/activeNode';
+import {
+  activeNode,
+  findChannel,
+  matchRadiusM,
+  tabOrder,
+} from '../components/Inspector/activeNode';
 
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
@@ -41,11 +46,15 @@ export function onKeyDown(e: KeyboardEvent): void {
   e.preventDefault();
 }
 
-/** `[` / `]`: cycle the inspector channel tabs (wraps). Returns false when there is no selection. */
+/**
+ * `[` / `]`: cycle the inspector channel tabs that have a node at the selection (within the match
+ * radius; wraps). Returns false when there is no selection.
+ */
 export function cycleTab(s: ViewerState, dir: -1 | 1): boolean {
   const sel = s.selection;
   if (!sel) return false;
-  const tabs = tabOrder(getGraph(s.model, s.lmId, s.graphId));
+  const graph = getGraph(s.model, s.lmId, s.graphId);
+  const tabs = tabOrder(graph, sel, matchRadiusM(graph, s.matchRadiusPct));
   const n = tabs.length;
   if (n === 0) return false;
   const i = Math.max(0, tabs.indexOf(s.activeTab ?? sel.channel));
@@ -62,7 +71,7 @@ export function stepNode(s: ViewerState, dir: -1 | 1): boolean {
   const sel = s.selection;
   if (!sel) return false;
   const graph = getGraph(s.model, s.lmId, s.graphId);
-  const active = activeNode(graph, sel, s.activeTab);
+  const active = activeNode(graph, sel, s.activeTab, matchRadiusM(graph, s.matchRadiusPct));
   const ch = active && findChannel(graph, active.channel);
   if (!active || !ch) return false;
   const next = Math.min(ch.n - 1, Math.max(0, active.index + dir));

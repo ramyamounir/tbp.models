@@ -1,11 +1,14 @@
 /**
- * Active node and nearest-node mapping across channels (spec Phase 4 "Active node and tabs",
+ * Active node and node matching across channels (spec Phase 4 "Active node and tabs",
  * "Nearest node across channels"). Pure helpers: no DOM, no store, no three.js.
  *
  * `selection` is the clicked node; the active node is `selection` when the active tab is the
- * selection's channel, otherwise the nearest node to `selection` in the active tab's channel.
+ * selection's channel, otherwise the nearest node to `selection` in the active tab's channel,
+ * provided it lies within the match radius (channels store their nodes independently, so a
+ * channel may have no node at the selected location).
  */
 import type { ChannelGraph, ObjectGraph } from '../../model/types';
+import { graphRadius } from '../../viewer/PointCloudLayer';
 
 export type Vec3 = [number, number, number];
 
@@ -64,15 +67,36 @@ export function nearestNode(
   return best < 0 ? undefined : { index: best, distM: Math.sqrt(bestD2) };
 }
 
+/** Match radius in metres (raw model units) for `pct` percent of the graph's radius `R`. */
+export function matchRadiusM(graph: ObjectGraph | undefined, pct: number): number {
+  return graph ? (pct / 100) * graphRadius(graph) : 0;
+}
+
+/** Positions equal up to float noise count as exact matches (labelled "exact"; matched even at radius 0). */
+export const EXACT_EPS_M = 1e-9;
+
+/**
+ * Nearest node of `c` to `p` if it lies within `radiusM` (metres), else undefined.
+ */
+export function matchedNode(
+  c: ChannelGraph,
+  p: Vec3,
+  radiusM: number,
+): { index: number; distM: number } | undefined {
+  const near = nearestNode(c, p);
+  return near && near.distM <= radiusM + EXACT_EPS_M ? near : undefined;
+}
+
 /**
  * The active node: the selection itself when `activeTab` is undefined or the selection's
- * channel; otherwise the nearest node in channel `activeTab` (undefined when that channel has
- * no finite rows, does not exist, or the selection's position is non-finite).
+ * channel; otherwise the nearest node in channel `activeTab` within `radiusM` metres (undefined
+ * when there is none, the channel does not exist, or the selection's position is non-finite).
  */
 export function activeNode(
   graph: ObjectGraph | undefined,
   selection: Selection | undefined,
   activeTab: string | undefined,
+  radiusM: number,
 ): ActiveNode | undefined {
   if (!selection) return undefined;
   if (activeTab === undefined || activeTab === selection.channel) {
@@ -82,13 +106,27 @@ export function activeNode(
   const other = findChannel(graph, activeTab);
   const p = own && nodePos(own, selection.index);
   if (!other || !p) return undefined;
-  const near = nearestNode(other, p);
+  const near = matchedNode(other, p, radiusM);
   return near && { channel: activeTab, index: near.index, distM: near.distM };
 }
 
-/** Inspector tab order: the channel names of the graph, in graph order. */
-export function tabOrder(graph: ObjectGraph | undefined): string[] {
-  return graph ? graph.channels.map((c) => c.channel) : [];
+/**
+ * Inspector tab order: the channel names of the graph, in graph order. With `selection`, only
+ * the selection's channel and channels with a node within `radiusM` of it.
+ */
+export function tabOrder(
+  graph: ObjectGraph | undefined,
+  selection?: Selection,
+  radiusM = 0,
+): string[] {
+  if (!graph) return [];
+  const own = selection && findChannel(graph, selection.channel);
+  const p = own && nodePos(own, selection.index);
+  return graph.channels
+    .filter(
+      (c) => !selection || c.channel === selection.channel || (p && matchedNode(c, p, radiusM)),
+    )
+    .map((c) => c.channel);
 }
 
 /** Distance in metres → `"2.9 mm"`. */

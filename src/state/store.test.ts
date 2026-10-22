@@ -298,6 +298,22 @@ describe('legend prefs', () => {
   });
 });
 
+describe('match radius', () => {
+  it('defaults to 2 % of R, clamps to 0..10 and survives setModel', () => {
+    const s = useViewerStore.getState();
+    expect(s.matchRadiusPct).toBe(2);
+    s.setMatchRadiusPct(50);
+    expect(useViewerStore.getState().matchRadiusPct).toBe(10);
+    s.setMatchRadiusPct(-1);
+    expect(useViewerStore.getState().matchRadiusPct).toBe(0);
+    s.setMatchRadiusPct(NaN);
+    expect(useViewerStore.getState().matchRadiusPct).toBe(0);
+    s.setMatchRadiusPct(3.5);
+    s.setModel(model, 1, 'cube');
+    expect(useViewerStore.getState().matchRadiusPct).toBe(3.5);
+  });
+});
+
 describe('child settings and inspector tab', () => {
   it('default to All / points / FEATURES; kept across graphs, reset by setModel', () => {
     const s = useViewerStore.getState();

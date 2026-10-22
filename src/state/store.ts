@@ -58,6 +58,12 @@ export interface ViewerState {
   graphId?: string; // key of model.lms[lmId].graphs
   selection?: { channel: string; index: number }; // index into that channel's nodes of the current graph
   activeTab?: string; // channel name of the active inspector tab
+  /**
+   * Inspector channel tabs: a node of another channel counts as "at" the selected node only
+   * within this distance, as a percentage of the object bounding-sphere radius `R` (0 = exact).
+   * A user preference: kept across selections, graphs and models.
+   */
+  matchRadiusPct: number;
   colorMode: ColorMode;
   display: DisplayOptions;
   objectRotationDeg: [number, number, number]; // Euler XYZ, degrees
@@ -93,6 +99,7 @@ export interface ViewerState {
   setTool(tool: Tool): void;
   setOrtho(ortho: boolean): void;
   setActiveTab(channel: string | undefined): void;
+  setMatchRadiusPct(pct: number): void;
   setOverlayChild(on: boolean): void;
   setInspectorTab(tab: InspectorTab): void;
   setChildColorMode(mode: ColorMode): void;
@@ -130,6 +137,10 @@ export const EDGE_LENGTH_MIN = 1;
 export const EDGE_LENGTH_MAX = 30;
 export const EDGE_WIDTH_MIN = 1;
 export const EDGE_WIDTH_MAX = 16;
+export const MATCH_RADIUS_MIN = 0;
+export const MATCH_RADIUS_MAX = 10;
+/** 2 % of R: about one node spacing in the pretrained YCB / compositional models. */
+export const DEFAULT_MATCH_RADIUS_PCT = 2;
 
 const clampNum = (v: number, lo: number, hi: number, fallback: number) =>
   Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
@@ -228,6 +239,7 @@ export const useViewerStore = create<ViewerState>()(
     graphId: undefined,
     selection: undefined,
     activeTab: undefined,
+    matchRadiusPct: DEFAULT_MATCH_RADIUS_PCT,
     colorMode: { kind: 'all' },
     display: { ...DEFAULT_DISPLAY },
     objectRotationDeg: [0, 0, 0],
@@ -341,6 +353,12 @@ export const useViewerStore = create<ViewerState>()(
     setActiveTab(activeTab) {
       if (get().selection === undefined) return;
       set({ activeTab, overlayChild: false });
+    },
+
+    setMatchRadiusPct(pct) {
+      set((s) => ({
+        matchRadiusPct: clampNum(pct, MATCH_RADIUS_MIN, MATCH_RADIUS_MAX, s.matchRadiusPct),
+      }));
     },
 
     setOverlayChild(overlayChild) {

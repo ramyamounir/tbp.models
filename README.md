@@ -17,22 +17,26 @@ receives model data.
      their node counts.
    - **Object rotation**: x/y/z sliders or the rotate tool; points, normal glyphs and child overlays
      rotate together.
-   - **Color points by**: All, SM feature (`hsv` / `rgba`), LM feature (`object_id`, with a legend
+   - **COLOR** tab (color points by): All, SM feature (`hsv` / `rgba`), LM feature (`object_id`, with a legend
      that decodes ids to child graph names), Channel source, Scalar feature (any component of any
      mapped feature, viridis). In the object_id and channel-source legends, drag a row's grip (or
      press ↑ / ↓ on it) to set color priority: where nodes overlap, the higher row is drawn on top.
      The eye button hides a row's nodes ("Show all" brings them back).
-   - **Display as**: Points (every node a dot, with the point size slider, 1–32 px) or Edges:
+   - **DISPLAY** tab (display as): Points (every node a dot, with the point size slider, 1–32 px) or Edges:
      nodes of a 2D sensor-module channel are drawn as short segments along their detected edge
      tangent (the second `pose_vectors` row), the other nodes stay dots; edge length (% of the
      object radius) and edge width (px) are adjustable. Available when the graph has an SM channel
      with `edge_strength` / `coherence`.
-   - **Display**: surface normals, center on centroid, dim nodes outside the selected channel.
-4. Click a node to open the **inspector**: one tab per input channel (other channels show the
-   nearest node and its distance), a pose glyph whose camera follows the viewport, the feature
-   table (click a feature name to color the cloud by it), and for LM-channel nodes the decoded child
-   object, "Overlay child in viewport" and **Open in LM k →** (the browser Back button returns to
-   the parent graph).
+     Below them: surface normals, center on centroid, dim nodes outside the selected channel.
+4. Click a node to open the **inspector**: one tab per input channel. Channels store their nodes
+   independently, so another channel's tab shows its node at this location: the nearest one
+   within the **match radius** (slider; drawn as a sphere around the selected node; far left =
+   exact matches only), or none. Then a pose glyph whose camera follows the viewport, and
+   FEATURES / COLOR / DISPLAY tabs: the feature table (click a feature name to color the cloud by
+   it) and, for LM-channel nodes, the coloring and display of the decoded child object in its
+   preview (with its own legend and a ring at `location_rel_model`) and overlay. Also
+   "Overlay child in viewport" (stays on while stepping with ‹ / › or ← / →) and
+   **Open in LM k →** (the browser Back button returns to the parent graph).
 5. **Screenshot** saves the viewport as PNG. "Copy as JSON" copies the node's values.
 
 Keyboard: `R` rotate tool, `Esc` clear selection, `F` fit, `[` / `]` cycle inspector tabs,

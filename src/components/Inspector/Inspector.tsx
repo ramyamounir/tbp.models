@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ChannelGraph, ObjectGraph } from '../../model/types';
 import { stepNode } from '../../state/keyboard';
-import { getGraph, useViewerStore } from '../../state/store';
+import { getGraph, MATCH_RADIUS_MAX, MATCH_RADIUS_MIN, useViewerStore } from '../../state/store';
 import { DisplayName } from '../../util/DisplayName';
 import { ActiveNodeMarker } from '../../viewer/ActiveNodeMarker';
+import { MatchSphere } from '../../viewer/MatchSphere';
 import { useViewer } from '../../viewer/sceneRegistry';
 import {
   activeNode,
   featureValues,
   findChannel,
   formatMm,
-  nearestNode,
+  EXACT_EPS_M,
+  matchedNode,
+  matchRadiusM,
   nodePos,
   type ActiveNode,
 } from './activeNode';
@@ -58,51 +61,86 @@ function IconButton({
   );
 }
 
-/** Channel tabs: one per channel; the selection's tab says "this node", others the nearest node. */
+/** "Match radius": no value shown; the viewport sphere shows it. */
+function MatchRadiusSlider() {
+  const pct = useViewerStore((s) => s.matchRadiusPct);
+  const setPct = useViewerStore((s) => s.setMatchRadiusPct);
+  return (
+    <label
+      className="mb-2 flex items-center gap-3"
+      title="How far another channel's node may be from the selected node to count as at this location (shown as a sphere in the viewport; far left = exact matches only)"
+    >
+      <span className="shrink-0 text-[12px] text-text">Match radius</span>
+      <input
+        type="range"
+        min={MATCH_RADIUS_MIN}
+        max={MATCH_RADIUS_MAX}
+        step={0.25}
+        value={pct}
+        onChange={(e) => setPct(Number(e.currentTarget.value))}
+        className="min-w-0 flex-1 accent-accent"
+        aria-label="Match radius"
+      />
+    </label>
+  );
+}
+
+/**
+ * Channel tabs: one per channel; the selection's tab says "this node", the others the node at
+ * the same location (nearest within the match radius), or that there is none (tab disabled).
+ */
 function ChannelTabs({
   graph,
   selection,
   activeTab,
+  radiusM,
 }: {
   graph: ObjectGraph;
   selection: { channel: string; index: number };
   activeTab: string;
+  radiusM: number;
 }) {
   const setActiveTab = useViewerStore((s) => s.setActiveTab);
   const near = useMemo(() => {
     const own = findChannel(graph, selection.channel);
     const p = own && nodePos(own, selection.index);
     return graph.channels.map((c) =>
-      c.channel === selection.channel ? null : p ? (nearestNode(c, p) ?? undefined) : undefined,
+      c.channel === selection.channel ? null : p ? matchedNode(c, p, radiusM) : undefined,
     );
-  }, [graph, selection]);
+  }, [graph, selection, radiusM]);
   return (
     <section>
       <div className="mb-1.5 flex items-center justify-between">
         <h3 className="text-[11px] font-semibold tracking-wide text-muted uppercase">
-          Channels near this node
+          Channels at this location
         </h3>
         <span className="font-mono text-[11px] text-faint" title="Cycle tabs with [ and ]">
           [ / ]
         </span>
       </div>
+      <MatchRadiusSlider />
       <div role="tablist" aria-label="Input channels" className="grid grid-cols-2 gap-2">
         {graph.channels.map((c, k) => {
           const selected = c.channel === activeTab;
           const n = near[k];
+          const none = n === undefined;
           return (
             <button
               key={c.channel}
               type="button"
               role="tab"
               aria-selected={selected}
-              onClick={() => setActiveTab(c.channel)}
+              aria-disabled={(none && !selected) || undefined}
+              title={none ? 'No node of this channel within the match radius' : undefined}
+              onClick={() => (!none || selected) && setActiveTab(c.channel)}
               className={`min-w-0 rounded-lg border px-2.5 py-1.5 text-left ${
                 selected
                   ? c.kind === 'sm'
                     ? 'border-ch-sm bg-ch-sm-bg'
                     : 'border-ch-lm bg-ch-lm-bg'
-                  : 'border-border bg-panel hover:bg-row-alt'
+                  : none
+                    ? 'cursor-not-allowed border-border bg-panel opacity-50'
+                    : 'border-border bg-panel hover:bg-row-alt'
               }`}
             >
               <div className="flex min-w-0 font-mono text-[13px] text-text">
@@ -113,9 +151,11 @@ function ChannelTabs({
                 <span className="truncate">
                   {n === null
                     ? 'this node'
-                    : n
-                      ? `node #${n.index} · ${formatMm(n.distM)}`
-                      : 'no nodes'}
+                    : !n
+                      ? 'none within radius'
+                      : n.distM <= EXACT_EPS_M
+                        ? `node #${n.index} · exact`
+                        : `node #${n.index} · ${formatMm(n.distM)}`}
                 </span>
               </div>
             </button>
@@ -289,6 +329,38 @@ function useActiveNodeMarker(
   }, [resolvedTheme]);
 }
 
+/** Match-radius sphere around the selected node (in viewer.overlayGroup), following the slider. */
+function useMatchSphere(
+  graph: ObjectGraph | undefined,
+  selection: { channel: string; index: number } | undefined,
+  radiusM: number,
+) {
+  const viewer = useViewer();
+  const resolvedTheme = useViewerStore((s) => s.resolvedTheme);
+  const sphereRef = useRef<MatchSphere | null>(null);
+  const ch = selection ? findChannel(graph, selection.channel) : undefined;
+  const p = ch && selection ? nodePos(ch, selection.index) : undefined;
+  const px = p?.[0];
+  const py = p?.[1];
+  const pz = p?.[2];
+  useEffect(() => {
+    if (!viewer || px === undefined || py === undefined || pz === undefined) return;
+    const s = new MatchSphere(viewer.overlayGroup, [px, py, pz]);
+    sphereRef.current = s;
+    return () => {
+      s.dispose();
+      sphereRef.current = null;
+    };
+  }, [viewer, px, py, pz]);
+  useEffect(() => {
+    sphereRef.current?.setRadius(radiusM);
+  }, [radiusM, px, py, pz]);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => sphereRef.current?.recolor());
+    return () => cancelAnimationFrame(id);
+  }, [resolvedTheme]);
+}
+
 /**
  * Right-hand node inspector (360 px), shown while a node is selected: header for the active node,
  * channel tabs, synced glyph preview, feature table (SM or LM) and footer. See spec Phase 4.
@@ -301,14 +373,17 @@ export function Inspector() {
   const selection = useViewerStore((s) => s.selection);
   const activeTab = useViewerStore((s) => s.activeTab);
   const setSelection = useViewerStore((s) => s.setSelection);
+  const matchRadiusPct = useViewerStore((s) => s.matchRadiusPct);
   const graph = getGraph(model, lmId, graphId);
+  const radiusM = useMemo(() => matchRadiusM(graph, matchRadiusPct), [graph, matchRadiusPct]);
   const active = useMemo(
-    () => activeNode(graph, selection, activeTab),
-    [graph, selection, activeTab],
+    () => activeNode(graph, selection, activeTab, radiusM),
+    [graph, selection, activeTab, radiusM],
   );
   const tab = activeTab ?? selection?.channel;
   const differs = !!selection && tab !== selection.channel;
   useActiveNodeMarker(graph, active, differs);
+  useMatchSphere(graph, selection, radiusM);
 
   if (!selection || !graph || !model || graphId === undefined || tab === undefined) return null;
   const tabChannel = findChannel(graph, tab);
@@ -364,12 +439,16 @@ export function Inspector() {
         </header>
 
         <div className="mt-4">
-          <ChannelTabs graph={graph} selection={selection} activeTab={tab} />
+          <ChannelTabs graph={graph} selection={selection} activeTab={tab} radiusM={radiusM} />
         </div>
 
         <div className="mt-4">
           {!valid ? (
-            <p className="text-[12px] text-faint">No nodes in this channel.</p>
+            <p className="text-[12px] text-faint">
+              {differs
+                ? 'No node of this channel within the match radius of the selected node. Widen the radius to match a nearby node.'
+                : 'No nodes in this channel.'}
+            </p>
           ) : ch.kind === 'sm' ? (
             <SmPanel channel={ch} index={idx} />
           ) : (
