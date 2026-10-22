@@ -1,14 +1,18 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { childPlacement, childRotation, type Vec3 } from '../model/childPose';
-import type { ChannelGraph, ObjectGraph } from '../model/types';
+import type { ChannelGraph, ModelFile, ObjectGraph } from '../model/types';
+import { DEFAULT_CHILD_DISPLAY, type ColorMode, type DisplayAsOptions } from '../state/store';
 import {
-  buildChildCloud,
+  buildChildObject,
   centerChildCloud,
+  CHILD_CLOUD_CSS,
   childCloudPositions,
+  childLook,
   lmNodePose,
   placeChildCloud,
 } from './ChildOverlay';
+import { CHILD_CATEGORICAL, cssToRgb, type RGB, type ThemeColors } from './colors';
 
 // Known asymmetric rotation R: 30° about normalized (1, 2, 3). R is the child→parent rotation.
 const axis = new THREE.Vector3(1, 2, 3).normalize();
@@ -112,7 +116,37 @@ describe('placeChildCloud', () => {
   });
 });
 
-describe('buildChildCloud', () => {
+const theme: ThemeColors = {
+  pointDefault: [0.5, 0.5, 0.5],
+  dim: [0.6, 0.6, 0.6],
+  sm: [0, 0.5, 0.7],
+  lm: [0.6, 0.2, 0.9],
+};
+const model: ModelFile = {
+  fileName: 'model.pt',
+  byteLength: 1,
+  lms: [],
+  lmToLm: [],
+  smToLm: [],
+  objectIdIndex: new Map(),
+};
+const BG: RGB = [1, 1, 1];
+const look = (
+  g: ObjectGraph,
+  mode: ColorMode = { kind: 'all' },
+  display: Partial<DisplayAsOptions> = {},
+) => childLook(model, g, mode, { ...DEFAULT_CHILD_DISPLAY, ...display }, theme);
+
+function drawn(obj: THREE.Object3D) {
+  const pts = obj.children.find((o) => o instanceof THREE.Points) as THREE.Points | undefined;
+  return {
+    pts,
+    lines: obj.children.filter((o) => !(o instanceof THREE.Points)),
+    pos: pts ? Array.from(pts.geometry.getAttribute('position').array as Float32Array) : [],
+  };
+}
+
+describe('childCloudPositions / buildChildObject', () => {
   it('uses SM channels only when present, skipping non-finite rows', () => {
     const g = graph([
       channel('patch', 'sm', [
@@ -124,10 +158,9 @@ describe('buildChildCloud', () => {
     ]);
     const pos = childCloudPositions(g)!;
     expect(Array.from(pos)).toEqual([0, 0, 0, 1, 1, 1]);
-    const pts = buildChildCloud(g)!;
-    expect(pts).toBeInstanceOf(THREE.Points);
-    expect(pts.geometry.getAttribute('position').count).toBe(2);
-    expect(pts.matrixAutoUpdate).toBe(false);
+    const obj = buildChildObject(g, look(g), BG)!;
+    expect(obj.matrixAutoUpdate).toBe(false);
+    expect(drawn(obj).pos).toEqual([0, 0, 0, 1, 1, 1]);
   });
 
   it('falls back to all channels when the child has no SM channel', () => {
@@ -151,8 +184,71 @@ describe('buildChildCloud', () => {
 
   it('returns null when there are no finite points', () => {
     const g = graph([channel('patch', 'sm', [[NaN, 0, 0]])]);
-    expect(buildChildCloud(g)).toBeNull();
-    expect(buildChildCloud(graph([]))).toBeNull();
+    expect(buildChildObject(g, look(g), BG)).toBeNull();
+    const empty = graph([]);
+    expect(buildChildObject(empty, look(empty), BG)).toBeNull();
+  });
+
+  it('draws "All" in the overlay pink at the chosen point size', () => {
+    const g = graph([channel('patch', 'sm', [[0, 0, 0]])]);
+    const { pts } = drawn(buildChildObject(g, look(g, { kind: 'all' }, { pointSize: 7 }), BG)!);
+    const mat = pts!.material as THREE.PointsMaterial;
+    expect(mat.size).toBe(7);
+    const c = new THREE.Color().fromBufferAttribute(
+      pts!.geometry.getAttribute('color') as THREE.BufferAttribute,
+      0,
+    );
+    const out = { r: 0, g: 0, b: 0 };
+    c.getRGB(out, THREE.SRGBColorSpace);
+    const pink = cssToRgb(CHILD_CLOUD_CSS);
+    expectClose([out.r, out.g, out.b], pink, 1e-4); // float32 color buffer
+  });
+
+  it('draws every channel for LM feature, dimmed nodes first, in the child palette', () => {
+    const lm = channel('learning_module_0', 'lm', [[5, 5, 5]], {
+      x: Float64Array.from([3]),
+      features: { object_id: [0, 1] },
+    });
+    const g = graph([channel('patch', 'sm', [[0, 0, 0]]), lm]);
+    const l = look(g, { kind: 'lm', feature: 'object_id' });
+    expect(l.mode).toEqual({ kind: 'lm', feature: 'object_id' });
+    const legend = l.coloring.legend!;
+    if (legend.kind !== 'categorical') throw new Error('expected categorical');
+    expect(legend.rows[0].color).toEqual(CHILD_CATEGORICAL[0]);
+    expect(legend.dimmedCount).toBe(1);
+    // The dimmed SM node is drawn first, so the LM node is drawn over it.
+    expect(drawn(buildChildObject(g, l, BG)!).pos).toEqual([0, 0, 0, 5, 5, 5]);
+  });
+
+  it('falls back to "All" and points when the child cannot show the chosen mode', () => {
+    const g = graph([channel('patch', 'sm', [[0, 0, 0]])]);
+    const l = look(g, { kind: 'lm', feature: 'object_id' }, { displayAs: 'edges' });
+    expect(l.mode).toEqual({ kind: 'all' });
+    expect(l.display.displayAs).toBe('points');
+  });
+
+  it('draws edge nodes of 2D-edge channels as segments instead of points', () => {
+    // pose_vectors [normal, tangent, perp] + pose_fully_defined + edge_strength.
+    const row = (pfd: number) => [0, 0, 1, 1, 0, 0, 0, 1, 0, pfd, 0.5];
+    const c = channel(
+      'patch',
+      'sm',
+      [
+        [0, 0, 0],
+        [1, 0, 0],
+      ],
+      {
+        x: Float64Array.from([...row(1), ...row(0)]),
+        F: 11,
+        features: { pose_vectors: [0, 9], pose_fully_defined: [9, 10], edge_strength: [10, 11] },
+      },
+    );
+    const g = graph([c]);
+    const l = look(g, { kind: 'all' }, { displayAs: 'edges' });
+    expect(l.display.displayAs).toBe('edges');
+    const d = drawn(buildChildObject(g, l, BG)!);
+    expect(d.lines).toHaveLength(1);
+    expect(d.pos).toEqual([1, 0, 0]); // the edge node has no point
   });
 });
 

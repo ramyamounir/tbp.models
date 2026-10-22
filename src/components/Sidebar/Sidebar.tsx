@@ -1,6 +1,7 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { openModelFile } from '../../loader/loadController';
 import { useViewerStore } from '../../state/store';
+import { PanelTabs, TabPanel } from '../PanelTabs';
 import { ColorModePanel } from './ColorModePanel';
 import { DisplayAsPanel } from './DisplayAsPanel';
 import { DisplayOptions } from './DisplayOptions';
@@ -27,6 +28,43 @@ export function SidebarSection({
         {aside}
       </div>
       {children}
+    </section>
+  );
+}
+
+type StyleTab = 'color' | 'display';
+const STYLE_TABS: { id: StyleTab; label: string }[] = [
+  { id: 'color', label: 'Color' },
+  { id: 'display', label: 'Display' },
+];
+
+/**
+ * COLOR ("Color points by") | DISPLAY ("Display as" and the display toggles) of the displayed
+ * graph; mirrors the inspector's COLOR / DISPLAY tabs for the child object.
+ */
+function StyleSection() {
+  const [tab, setTab] = useState<StyleTab>('color');
+  return (
+    <section className="border-b border-border px-4 py-4 last:border-b-0">
+      <PanelTabs<StyleTab>
+        tabs={STYLE_TABS}
+        value={tab}
+        onChange={setTab}
+        ariaLabel="Point style"
+        idPrefix="sidebar-style"
+      />
+      <TabPanel idPrefix="sidebar-style" id={tab} className="mt-3">
+        {tab === 'color' ? (
+          <ColorModePanel />
+        ) : (
+          <>
+            <DisplayAsPanel />
+            <div className="mt-3 border-t border-border pt-2">
+              <DisplayOptions />
+            </div>
+          </>
+        )}
+      </TabPanel>
     </section>
   );
 }
@@ -60,7 +98,7 @@ function useDocumentFileDrop() {
 
 /**
  * Left sidebar (272 px): model (drop zone, progress, errors, summary), LM selector and graph
- * list (Phase 2); color mode and display options (Phase 3). Collapsing (Phase 5) only hides it, so the
+ * list (Phase 2); color mode and display options as COLOR / DISPLAY tabs (Phase 3). Collapsing (Phase 5) only hides it, so the
  * document-level drop handler and component state stay alive.
  */
 export function Sidebar({ open = true }: { open?: boolean }) {
@@ -104,15 +142,7 @@ export function Sidebar({ open = true }: { open?: boolean }) {
       >
         <GraphList key={`${loadGen}-${lmId}`} />
       </SidebarSection>
-      <SidebarSection title="Color points by">
-        <ColorModePanel />
-      </SidebarSection>
-      <SidebarSection title="Display as">
-        <DisplayAsPanel />
-      </SidebarSection>
-      <SidebarSection title="Display">
-        <DisplayOptions />
-      </SidebarSection>
+      <StyleSection />
     </aside>
   );
 }

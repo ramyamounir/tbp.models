@@ -55,8 +55,8 @@ export function cycleTab(s: ViewerState, dir: -1 | 1): boolean {
 
 /**
  * `←` / `→` (and the inspector header prev/next buttons): select the previous/next node of the
- * active node's channel, clamped to the channel (no wrap; a no-op at either end). Returns false
- * when there is no selection or active node.
+ * active node's channel, clamped to the channel (no wrap; a no-op at either end). The child
+ * overlay stays on if it was on. Returns false when there is no selection or active node.
  */
 export function stepNode(s: ViewerState, dir: -1 | 1): boolean {
   const sel = s.selection;
@@ -66,7 +66,8 @@ export function stepNode(s: ViewerState, dir: -1 | 1): boolean {
   const ch = active && findChannel(graph, active.channel);
   if (!active || !ch) return false;
   const next = Math.min(ch.n - 1, Math.max(0, active.index + dir));
-  if (next !== active.index) s.setSelection({ channel: active.channel, index: next });
+  if (next !== active.index)
+    s.setSelection({ channel: active.channel, index: next }, { keepOverlay: true });
   return true;
 }
 

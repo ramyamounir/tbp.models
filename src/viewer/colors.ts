@@ -65,6 +65,22 @@ export const CATEGORICAL_CSS = [
 ] as const;
 const CATEGORICAL: RGB[] = CATEGORICAL_CSS.map(cssToRgb);
 
+/**
+ * Categorical palette for a child object's `object_id` (inspector preview and child overlay):
+ * disjoint from `CATEGORICAL_CSS`, so a child row is never confused with a parent row.
+ */
+export const CHILD_CATEGORICAL_CSS = [
+  '#FACC15',
+  '#92400E',
+  '#1E3A8A',
+  '#F9A8D4',
+  '#166534',
+  '#C4B5FD',
+  '#99F6E4',
+  '#7F1D1D',
+] as const;
+export const CHILD_CATEGORICAL: RGB[] = CHILD_CATEGORICAL_CSS.map(cssToRgb);
+
 /** HSV (all in 0..1) → RGB; not HSL. */
 export function hsvToRgb(h: number, s: number, v: number): RGB {
   const hh = (((h % 1) + 1) % 1) * 6;
@@ -323,7 +339,7 @@ function colorOverDimmed(out: ChannelColoring[]) {
 
 /**
  * Colors every channel of `graph` for `mode`. `prefs` (legend row order and hidden rows) apply to
- * the categorical and channel-source legends.
+ * the categorical and channel-source legends; `palette` colors the categorical rows.
  */
 export function computeColoring(
   model: ModelFile,
@@ -331,6 +347,7 @@ export function computeColoring(
   mode: ColorMode,
   theme: ThemeColors,
   prefs?: LegendPrefsByKind,
+  palette: readonly RGB[] = CATEGORICAL,
 ): Coloring {
   const out: ChannelColoring[] = graph.channels.map((c) => ({
     channel: c.channel,
@@ -452,7 +469,7 @@ export function computeColoring(
             row = {
               key,
               id: raw,
-              color: CATEGORICAL[rows.size % CATEGORICAL.length],
+              color: palette[rows.size % palette.length],
               count: 0,
               channel: c.channel,
               lmPrefix,

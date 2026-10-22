@@ -16,6 +16,8 @@ export interface RowSpec {
   label: ReactNode;
   value: ReactNode;
   sub?: ReactNode;
+  /** Pointer enters (true) / leaves (false) the row. */
+  onHover?(on: boolean): void;
 }
 
 export const name = (n: string) => <DisplayName value={n} max={40} />;

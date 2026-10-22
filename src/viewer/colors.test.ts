@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ChannelGraph, ModelFile, ObjectGraph } from '../model/types';
 import type { LegendPrefsByKind } from '../state/store';
-import { applyLegendOrder, computeColoring, DIMMED_KEY, type ThemeColors } from './colors';
+import {
+  applyLegendOrder,
+  CHILD_CATEGORICAL,
+  computeColoring,
+  DIMMED_KEY,
+  type ThemeColors,
+} from './colors';
 
 const theme: ThemeColors = {
   pointDefault: [0.5, 0.5, 0.5],
@@ -90,6 +96,20 @@ describe('computeColoring legend priority and hiding', () => {
     expect([...reordered.channels[1].priority]).toEqual([2, 1]);
     // Colors follow the row, not its rank.
     expect(reordered.channels[2].colors).toEqual(c.channels[2].colors);
+  });
+
+  it('colors categorical rows from the given palette', () => {
+    const c = computeColoring(
+      model,
+      graph,
+      { kind: 'lm', feature: 'object_id' },
+      theme,
+      undefined,
+      CHILD_CATEGORICAL,
+    );
+    const legend = c.legend!;
+    if (legend.kind !== 'categorical') throw new Error('expected categorical');
+    expect(legend.rows.map((r) => r.color)).toEqual(CHILD_CATEGORICAL.slice(0, 3));
   });
 
   it('hides categorical rows and the dimmed row', () => {

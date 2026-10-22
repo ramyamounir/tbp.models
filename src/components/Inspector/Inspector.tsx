@@ -14,6 +14,7 @@ import {
   nodePos,
   type ActiveNode,
 } from './activeNode';
+import { InspectorTabPanel, InspectorTabStrip } from './ChildStyle';
 import { poseRowLabels } from './featureRows';
 import { SmFeatureTable } from './FeatureTable';
 import { fmt } from './format';
@@ -125,6 +126,8 @@ function ChannelTabs({
   );
 }
 
+const SM_NO_CHILD = 'Only LM nodes have a child object to color and display';
+
 function SmPanel({ channel: c, index: i }: { channel: ChannelGraph; index: number }) {
   const content = useMemo<GlyphContent | null>(() => {
     const v = featureValues(c, i, 'pose_vectors');
@@ -156,13 +159,13 @@ function SmPanel({ channel: c, index: i }: { channel: ChannelGraph; index: numbe
         </div>
       </div>
       <section>
-        <h3 className="mb-1.5 text-[11px] font-semibold tracking-wide text-muted uppercase">
-          Features
-        </h3>
-        <SmFeatureTable channel={c} index={i} />
-        <p className="mt-2 text-[11px] text-faint">
-          Click a feature name to color the cloud by it.
-        </p>
+        <InspectorTabStrip tab="features" disabledTitle={SM_NO_CHILD} />
+        <InspectorTabPanel tab="features">
+          <SmFeatureTable channel={c} index={i} />
+          <p className="mt-2 text-[11px] text-faint">
+            Click a feature name to color the cloud by it.
+          </p>
+        </InspectorTabPanel>
       </section>
     </div>
   );

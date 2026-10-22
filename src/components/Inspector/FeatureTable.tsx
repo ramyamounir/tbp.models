@@ -12,6 +12,8 @@ export function Table({ rows }: { rows: RowSpec[] }) {
       {rows.map((r, i) => (
         <div
           key={r.key}
+          onPointerEnter={r.onHover && (() => r.onHover!(true))}
+          onPointerLeave={r.onHover && (() => r.onHover!(false))}
           className={`grid grid-cols-[132px_1fr] gap-2 px-2.5 py-1.5 font-mono text-[12px] ${
             i % 2 === 0 ? 'bg-row-alt' : 'bg-panel'
           }`}

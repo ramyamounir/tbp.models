@@ -7,13 +7,77 @@
  */
 import * as THREE from 'three';
 import { childPlacement, childRotation, type Vec3 } from '../model/childPose';
-import type { ChannelGraph, ObjectGraph } from '../model/types';
-import { cssToRgb } from './colors';
+import { isEdgeChannel } from '../model/edges';
+import type { ChannelGraph, ModelFile, ObjectGraph } from '../model/types';
+import {
+  validateColorMode,
+  validateDisplayAs,
+  type ColorMode,
+  type DisplayAsOptions,
+} from '../state/store';
+import {
+  CHILD_CATEGORICAL,
+  computeColoring,
+  cssToRgb,
+  type Coloring,
+  type RGB,
+  type ThemeColors,
+} from './colors';
+import { EdgeLayer } from './EdgeLayer';
+import { graphRadius } from './PointCloudLayer';
 
-/** Overlay pink for child clouds (spec "Glyph sync"; app constant, not a theme token). */
+/** Overlay pink for child clouds ("All" mode; app constant, not a theme token). */
 export const CHILD_CLOUD_CSS = '#DB2777';
 export const CHILD_CLOUD_MAX_POINTS = 2000;
-const CHILD_POINT_PX = 2.5;
+/** Dimmed child nodes are blended this far from the background toward their (dim) color. */
+const CHILD_DIM_ALPHA = 0.5;
+
+/**
+ * How the child object is drawn (inspector COLOR / DISPLAY tabs), already validated against the
+ * child graph. `coloring` covers every channel of the child (`computeColoring` order).
+ */
+export interface ChildLook {
+  mode: ColorMode;
+  display: DisplayAsOptions;
+  coloring: Coloring;
+}
+
+/**
+ * The child's look for the user's child settings: color mode and "Display as" fall back to "All"
+ * / points when the child graph cannot show them; categorical rows use the child palette and
+ * "All" the overlay pink.
+ */
+export function childLook(
+  model: ModelFile,
+  child: ObjectGraph,
+  mode: ColorMode,
+  display: DisplayAsOptions,
+  theme: ThemeColors,
+): ChildLook {
+  const m = validateColorMode(mode, child);
+  const displayAs = validateDisplayAs(display.displayAs, child);
+  return {
+    mode: m,
+    display: displayAs === display.displayAs ? display : { ...display, displayAs },
+    coloring: computeColoring(
+      model,
+      child,
+      m,
+      { ...theme, pointDefault: cssToRgb(CHILD_CLOUD_CSS) },
+      undefined,
+      CHILD_CATEGORICAL,
+    ),
+  };
+}
+
+/**
+ * Channels drawn for color mode `mode`: the SM channels (`childSourceChannels`) for "All" and
+ * "SM feature", every channel for modes that color LM channels too (LM feature, channel source,
+ * scalar), so their colors and legend counts show.
+ */
+export function childChannelsFor(child: ObjectGraph, mode: ColorMode): ChannelGraph[] {
+  return mode.kind === 'all' || mode.kind === 'sm' ? childSourceChannels(child) : child.channels;
+}
 
 /** Pose of an LM node needed to place its child: raw position, `pose_vectors`, optional `l`. */
 export interface LmNodePose {
@@ -50,6 +114,37 @@ export function childSourceChannels(child: ObjectGraph): ChannelGraph[] {
   return sm.length > 0 ? sm : child.channels;
 }
 
+const finiteRow = (c: ChannelGraph, i: number) =>
+  Number.isFinite(c.pos[3 * i]) &&
+  Number.isFinite(c.pos[3 * i + 1]) &&
+  Number.isFinite(c.pos[3 * i + 2]);
+
+/**
+ * Rows drawn as points: finite rows of `src` (in channel order) not in `skip` (per channel, 1 =
+ * drawn as an edge instead), downsampled by stride to at most `maxPoints`. `[channel, row]` pairs.
+ */
+function childCloudRows(
+  src: ChannelGraph[],
+  maxPoints: number,
+  skip?: (Uint8Array | undefined)[],
+): [number, number][] {
+  let total = 0;
+  src.forEach((c, k) => {
+    for (let i = 0; i < c.n; i++) if (skip?.[k]?.[i] !== 1 && finiteRow(c, i)) total++;
+  });
+  const out: [number, number][] = [];
+  if (total === 0) return out;
+  const stride = Math.max(1, Math.ceil(total / Math.max(1, maxPoints)));
+  let j = 0; // index among drawable rows
+  src.forEach((c, k) => {
+    for (let i = 0; i < c.n; i++) {
+      if (skip?.[k]?.[i] === 1 || !finiteRow(c, i)) continue;
+      if (j++ % stride === 0) out.push([k, i]);
+    }
+  });
+  return out;
+}
+
 /**
  * Raw (uncentered) child points: finite rows of every source channel in channel order,
  * downsampled by stride so the result has at most `maxPoints` points. Null when there are none.
@@ -57,38 +152,13 @@ export function childSourceChannels(child: ObjectGraph): ChannelGraph[] {
 export function childCloudPositions(
   child: ObjectGraph,
   maxPoints = CHILD_CLOUD_MAX_POINTS,
+  src: ChannelGraph[] = childSourceChannels(child),
 ): Float32Array | null {
-  const src = childSourceChannels(child);
-  let total = 0;
-  for (const c of src) {
-    for (let i = 0; i < c.n; i++) {
-      if (
-        Number.isFinite(c.pos[3 * i]) &&
-        Number.isFinite(c.pos[3 * i + 1]) &&
-        Number.isFinite(c.pos[3 * i + 2])
-      ) {
-        total++;
-      }
-    }
-  }
-  if (total === 0) return null;
-  const stride = Math.max(1, Math.ceil(total / Math.max(1, maxPoints)));
-  const out = new Float32Array(Math.ceil(total / stride) * 3);
-  let k = 0; // index among finite rows
-  let o = 0;
-  for (const c of src) {
-    for (let i = 0; i < c.n; i++) {
-      const x = c.pos[3 * i];
-      const y = c.pos[3 * i + 1];
-      const z = c.pos[3 * i + 2];
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
-      if (k++ % stride !== 0) continue;
-      out[o++] = x;
-      out[o++] = y;
-      out[o++] = z;
-    }
-  }
-  return out.subarray(0, o);
+  const rows = childCloudRows(src, maxPoints);
+  if (rows.length === 0) return null;
+  const out = new Float32Array(rows.length * 3);
+  rows.forEach(([k, i], o) => out.set(src[k].pos.subarray(3 * i, 3 * i + 3), 3 * o));
+  return out;
 }
 
 /** True when the child graph has at least one finite point to draw. */
@@ -96,33 +166,81 @@ export function childHasPoints(child: ObjectGraph): boolean {
   return childCloudPositions(child, 1) !== null;
 }
 
+const tmpColor = new THREE.Color();
+
 /**
- * Child cloud as `THREE.Points` in the child's raw frame (overlay pink, ≤ `maxPoints` points),
- * or null when the source channels have no finite rows. Caller places it with
- * `placeChildCloud` (viewport) or `centerChildCloud` (GlyphView) and disposes it.
+ * Child object drawn with `look` (inspector COLOR / DISPLAY), as a group in the child's raw frame:
+ * colored points (≤ `maxPoints`) and, for "Display as: Edges", one segment per edge node of its
+ * 2D-edge channels (those nodes get no point). Points are ordered by draw priority (dimmed first,
+ * top legend row last), so with depth writes off the top row is drawn over the others. Dimmed
+ * nodes are blended toward `bg` (points by `CHILD_DIM_ALPHA`, edges as in the viewport). Null when
+ * nothing is drawable. The caller places it with `placeChildCloud` (viewport) or
+ * `centerChildCloud` (GlyphView) and disposes it.
  */
-export function buildChildCloud(
+export function buildChildObject(
   child: ObjectGraph,
+  look: ChildLook,
+  bg: RGB,
   maxPoints = CHILD_CLOUD_MAX_POINTS,
-): THREE.Points | null {
-  const positions = childCloudPositions(child, maxPoints);
-  if (!positions) return null;
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const [r, g, b] = cssToRgb(CHILD_CLOUD_CSS);
-  const material = new THREE.PointsMaterial({
-    color: new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace),
-    size: CHILD_POINT_PX,
-    sizeAttenuation: false,
-    transparent: true,
-    opacity: 0.85,
-    depthWrite: false,
-  });
-  const points = new THREE.Points(geometry, material);
-  points.name = 'child-cloud';
-  points.matrixAutoUpdate = false;
-  points.raycast = () => {}; // overlays are never pickable
-  return points;
+): THREE.Group | null {
+  const group = new THREE.Group();
+  group.name = 'child-cloud';
+  group.matrixAutoUpdate = false;
+  const src = childChannelsFor(child, look.mode);
+  const coloring = src.map((c) => look.coloring.channels[child.channels.indexOf(c)]);
+  const { display } = look;
+
+  const skip: (Uint8Array | undefined)[] = [];
+  if (display.displayAs === 'edges') {
+    const halfLen = 0.5 * (display.edgeLengthPct / 100) * graphRadius(child);
+    src.forEach((c, k) => {
+      if (!isEdgeChannel(c)) return;
+      const e = new EdgeLayer(c, halfLen);
+      if (e.segments.count === 0) return e.dispose();
+      const cc = coloring[k];
+      e.setColors(cc.colors, cc.dimmed, cc.hidden, false, bg);
+      e.setWidth(display.edgeWidthPx);
+      group.add(e.lines);
+      skip[k] = e.hiddenMask;
+    });
+  }
+
+  const rows = childCloudRows(src, maxPoints, skip);
+  if (rows.length > 0) {
+    const order = rows
+      .map((r, j) => ({ r, j, p: coloring[r[0]].priority[r[1]] }))
+      .sort((a, b) => a.p - b.p || a.j - b.j);
+    const positions = new Float32Array(rows.length * 3);
+    const colors = new Float32Array(rows.length * 3);
+    order.forEach(({ r: [k, i] }, o) => {
+      positions.set(src[k].pos.subarray(3 * i, 3 * i + 3), 3 * o);
+      const cc = coloring[k];
+      const a = cc.dimmed[i] === 1 ? CHILD_DIM_ALPHA : 1;
+      const rgb = [0, 1, 2].map((ch) => bg[ch] + (cc.colors[3 * i + ch] - bg[ch]) * a);
+      // Coloring is sRGB; vertex colors are in the (linear) working color space.
+      tmpColor.setRGB(rgb[0], rgb[1], rgb[2], THREE.SRGBColorSpace);
+      colors[3 * o] = tmpColor.r;
+      colors[3 * o + 1] = tmpColor.g;
+      colors[3 * o + 2] = tmpColor.b;
+    });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const points = new THREE.Points(
+      geometry,
+      new THREE.PointsMaterial({
+        size: display.pointSize,
+        sizeAttenuation: false,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false,
+      }),
+    );
+    points.raycast = () => {}; // overlays are never pickable
+    group.add(points);
+  }
+  return group.children.length > 0 ? group : null;
 }
 
 /**

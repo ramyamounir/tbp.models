@@ -30,7 +30,14 @@ export interface DisplayOptions {
   /** Edge segment width in CSS px. */
   edgeWidthPx: number;
 }
+/** The "Display as" settings, shared by the parent graph and the inspector's child object. */
+export type DisplayAsOptions = Pick<
+  DisplayOptions,
+  'displayAs' | 'pointSize' | 'edgeLengthPct' | 'edgeWidthPx'
+>;
 export type Tool = 'orbit' | 'pan' | 'pick' | 'rotate';
+/** Inspector tabs of an LM node; COLOR and DISPLAY style the child object (preview and overlay). */
+export type InspectorTab = 'features' | 'color' | 'display';
 
 /** Legends whose rows the user can reorder (color priority) and hide: object_id and channel source. */
 export type LegendKind = 'categorical' | 'channel';
@@ -58,6 +65,14 @@ export interface ViewerState {
   tool: Tool;
   ortho: boolean;
   overlayChild: boolean;
+  inspectorTab: InspectorTab; // kept across nodes; SM nodes always show FEATURES
+  /**
+   * Coloring and "Display as" of the child object of an LM node (inspector preview and viewport
+   * overlay). Kept across nodes and graphs, reset by setModel; validated against each child graph
+   * where it is used (`validateColorMode` / `validateDisplayAs`), not here.
+   */
+  childColorMode: ColorMode;
+  childDisplay: DisplayAsOptions;
   theme: Theme; // user choice; single owner
   systemPrefersDark: boolean; // mirrors matchMedia('(prefers-color-scheme: dark)'); written only by ThemeProvider
   resolvedTheme: 'light' | 'dark'; // derived = resolveTheme(theme, systemPrefersDark); never set directly
@@ -66,7 +81,8 @@ export interface ViewerState {
   setLoading(loading: ViewerState['loading']): void;
   setError(error: string | undefined): void;
   selectGraph(lmId: number, graphId: string | undefined): void;
-  setSelection(selection: ViewerState['selection']): void;
+  /** Turns the child overlay off unless `keepOverlay` (stepping to the previous/next node). */
+  setSelection(selection: ViewerState['selection'], opts?: { keepOverlay?: boolean }): void;
   setColorMode(mode: ColorMode): void;
   setDisplay(patch: Partial<DisplayOptions>): void;
   setRotation(deg: [number, number, number]): void;
@@ -78,6 +94,9 @@ export interface ViewerState {
   setOrtho(ortho: boolean): void;
   setActiveTab(channel: string | undefined): void;
   setOverlayChild(on: boolean): void;
+  setInspectorTab(tab: InspectorTab): void;
+  setChildColorMode(mode: ColorMode): void;
+  setChildDisplay(patch: Partial<DisplayAsOptions>): void;
   setTheme(theme: Theme): void;
   setSystemPrefersDark(dark: boolean): void;
 }
@@ -90,6 +109,14 @@ export const DEFAULT_DISPLAY: DisplayOptions = {
   displayAs: 'points',
   edgeLengthPct: 8, // tbp.teleop draws ±0.04 × half-extent, i.e. 8 % of the frame half-size
   edgeWidthPx: 2,
+};
+
+/** Child object defaults: the overlay pink ("All") drawn as points. */
+export const DEFAULT_CHILD_DISPLAY: DisplayAsOptions = {
+  displayAs: 'points',
+  pointSize: 3,
+  edgeLengthPct: DEFAULT_DISPLAY.edgeLengthPct,
+  edgeWidthPx: DEFAULT_DISPLAY.edgeWidthPx,
 };
 
 const emptyLegendPrefs = (): LegendPrefsByKind => ({
@@ -106,6 +133,16 @@ export const EDGE_WIDTH_MAX = 16;
 
 const clampNum = (v: number, lo: number, hi: number, fallback: number) =>
   Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
+
+/** `prev` patched with `patch`, numbers clamped to their slider ranges (invalid → previous). */
+function patchDisplayAs<T extends DisplayAsOptions>(prev: T, patch: Partial<T>): T {
+  const d = { ...prev, ...patch };
+  d.pointSize = clampNum(d.pointSize, POINT_SIZE_MIN, POINT_SIZE_MAX, prev.pointSize);
+  d.edgeLengthPct = clampNum(d.edgeLengthPct, EDGE_LENGTH_MIN, EDGE_LENGTH_MAX, prev.edgeLengthPct);
+  d.edgeWidthPx = clampNum(d.edgeWidthPx, EDGE_WIDTH_MIN, EDGE_WIDTH_MAX, prev.edgeWidthPx);
+  if (d.displayAs !== 'points' && d.displayAs !== 'edges') d.displayAs = prev.displayAs;
+  return d;
+}
 
 /** Graph `graphId` of LM index `lmId`, or undefined. */
 export function getGraph(
@@ -198,6 +235,9 @@ export const useViewerStore = create<ViewerState>()(
     tool: 'orbit',
     ortho: false,
     overlayChild: false,
+    inspectorTab: 'features',
+    childColorMode: { kind: 'all' },
+    childDisplay: { ...DEFAULT_CHILD_DISPLAY },
     ...initialTheme(),
 
     setModel(model, lmId, graphId) {
@@ -208,6 +248,8 @@ export const useViewerStore = create<ViewerState>()(
         loadGen: s.loadGen + 1,
         loading: undefined,
         legend: emptyLegendPrefs(),
+        childColorMode: { kind: 'all' },
+        childDisplay: { ...DEFAULT_CHILD_DISPLAY },
         error: undefined,
         ...graphChangeResets(model, lmId, graphId, s.colorMode, s.display),
       }));
@@ -235,8 +277,12 @@ export const useViewerStore = create<ViewerState>()(
       });
     },
 
-    setSelection(selection) {
-      set({ selection, activeTab: selection?.channel, overlayChild: false });
+    setSelection(selection, opts) {
+      set((s) => ({
+        selection,
+        activeTab: selection?.channel,
+        overlayChild: !!opts?.keepOverlay && selection !== undefined && s.overlayChild,
+      }));
     },
 
     setColorMode(colorMode) {
@@ -245,27 +291,7 @@ export const useViewerStore = create<ViewerState>()(
 
     setDisplay(patch) {
       set((s) => {
-        const display = { ...s.display, ...patch };
-        display.pointSize = clampNum(
-          display.pointSize,
-          POINT_SIZE_MIN,
-          POINT_SIZE_MAX,
-          s.display.pointSize,
-        );
-        display.edgeLengthPct = clampNum(
-          display.edgeLengthPct,
-          EDGE_LENGTH_MIN,
-          EDGE_LENGTH_MAX,
-          s.display.edgeLengthPct,
-        );
-        display.edgeWidthPx = clampNum(
-          display.edgeWidthPx,
-          EDGE_WIDTH_MIN,
-          EDGE_WIDTH_MAX,
-          s.display.edgeWidthPx,
-        );
-        if (display.displayAs !== 'points' && display.displayAs !== 'edges')
-          display.displayAs = s.display.displayAs;
+        const display = patchDisplayAs(s.display, patch);
         if (
           display.displayAs === 'edges' &&
           !graphHasEdgeChannel(getGraph(s.model, s.lmId, s.graphId))
@@ -319,6 +345,20 @@ export const useViewerStore = create<ViewerState>()(
 
     setOverlayChild(overlayChild) {
       set({ overlayChild });
+    },
+
+    setInspectorTab(inspectorTab) {
+      if (inspectorTab !== 'features' && inspectorTab !== 'color' && inspectorTab !== 'display')
+        return;
+      set({ inspectorTab });
+    },
+
+    setChildColorMode(childColorMode) {
+      set({ childColorMode });
+    },
+
+    setChildDisplay(patch) {
+      set((s) => ({ childDisplay: patchDisplayAs(s.childDisplay, patch) }));
     },
 
     setTheme(theme) {

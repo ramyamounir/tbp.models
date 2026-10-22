@@ -9,6 +9,7 @@ const has = (g: ObjectGraph, kind: 'sm' | 'lm', name: string) =>
   g.channels.some((c) => c.kind === kind && Object.prototype.hasOwnProperty.call(c.features, name));
 
 function Option({
+  name,
   checked,
   disabled,
   label,
@@ -16,6 +17,7 @@ function Option({
   children,
   title,
 }: {
+  name: string;
   checked: boolean;
   disabled?: boolean;
   label: string;
@@ -30,7 +32,7 @@ function Option({
       >
         <input
           type="radio"
-          name="color-mode"
+          name={name}
           checked={checked}
           disabled={disabled}
           onChange={onSelect}
@@ -49,7 +51,7 @@ const sub = 'font-mono text-[11px] text-muted';
 const select =
   'max-w-full rounded border border-border bg-panel px-1 py-0.5 font-mono text-[11px] text-text disabled:cursor-not-allowed';
 
-/** "Color points by": All / SM feature / LM feature / Channel source / Scalar feature. */
+/** "Color points by" of the displayed graph (sidebar COLOR tab). */
 export function ColorModePanel() {
   const model = useViewerStore((s) => s.model);
   const lmId = useViewerStore((s) => s.lmId);
@@ -57,9 +59,37 @@ export function ColorModePanel() {
   const mode = useViewerStore((s) => s.colorMode);
   const setColorMode = useViewerStore((s) => s.setColorMode);
   const graph = getGraph(model, lmId, graphId);
-  const options = useMemo(() => scalarOptions(graph), [graph]);
-
   if (!graph) return <p className="text-xs text-faint">—</p>;
+  return (
+    <ColorModeOptions
+      graph={graph}
+      mode={mode}
+      onChange={setColorMode}
+      name="color-mode"
+      ariaLabel="Color points by"
+    />
+  );
+}
+
+/**
+ * All / SM feature / LM feature / Channel source / Scalar feature, offered for `graph` (the
+ * displayed graph in the sidebar, the child object in the inspector). `mode` must be valid for
+ * `graph` (`validateColorMode`); `name` is the radio group name.
+ */
+export function ColorModeOptions({
+  graph,
+  mode,
+  onChange: set,
+  name,
+  ariaLabel,
+}: {
+  graph: ObjectGraph;
+  mode: ColorMode;
+  onChange(mode: ColorMode): void;
+  name: string;
+  ariaLabel: string;
+}) {
+  const options = useMemo(() => scalarOptions(graph), [graph]);
 
   const total = graph.channels.reduce((s, c) => s + c.n, 0);
   const smFeatures = (['hsv', 'rgba'] as const).filter((f) => has(graph, 'sm', f));
@@ -70,15 +100,20 @@ export function ColorModePanel() {
     mode.kind === 'scalar'
       ? options.findIndex((o) => o.feature === mode.feature && o.component === mode.component)
       : 0;
-  const set = (m: ColorMode) => setColorMode(m);
 
   return (
-    <div role="radiogroup" aria-label="Color points by">
-      <Option checked={mode.kind === 'all'} label="All" onSelect={() => set({ kind: 'all' })}>
+    <div role="radiogroup" aria-label={ariaLabel}>
+      <Option
+        name={name}
+        checked={mode.kind === 'all'}
+        label="All"
+        onSelect={() => set({ kind: 'all' })}
+      >
         <span className={sub}>uniform · {total.toLocaleString('en-US')} pts</span>
       </Option>
 
       <Option
+        name={name}
         checked={mode.kind === 'sm'}
         disabled={smFeatures.length === 0}
         title={
@@ -110,6 +145,7 @@ export function ColorModePanel() {
       </Option>
 
       <Option
+        name={name}
         checked={mode.kind === 'lm'}
         disabled={!hasLm}
         title={!hasLm ? 'No LM channel with object_id in this graph' : undefined}
@@ -120,6 +156,7 @@ export function ColorModePanel() {
       </Option>
 
       <Option
+        name={name}
         checked={mode.kind === 'channel'}
         label="Channel source"
         onSelect={() => set({ kind: 'channel' })}
@@ -128,6 +165,7 @@ export function ColorModePanel() {
       </Option>
 
       <Option
+        name={name}
         checked={mode.kind === 'scalar'}
         disabled={options.length === 0}
         title={options.length === 0 ? 'No scalar features in this graph' : undefined}

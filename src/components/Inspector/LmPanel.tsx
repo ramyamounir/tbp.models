@@ -3,22 +3,31 @@ import { resolveObjectId } from '../../model/hash';
 import type { ChannelGraph, ModelFile, ObjectIdEncoding } from '../../model/types';
 import { navigateToGraph } from '../../state/history';
 import { useViewerStore } from '../../state/store';
+import { readToken } from '../../theme/readToken';
 import { DisplayName } from '../../util/DisplayName';
 import { displayName } from '../../util/displayName';
 import {
-  buildChildCloud,
+  buildChildObject,
   childHasPoints,
   lmNodePose,
   placeChildCloud,
 } from '../../viewer/ChildOverlay';
-import { objectIdLabel } from '../../viewer/colors';
+import { cssToRgb, objectIdLabel } from '../../viewer/colors';
 import { disposeObject } from '../../viewer/Glyphs';
 import { useViewer } from '../../viewer/sceneRegistry';
+import { useThemeColors } from '../Viewport/useThemeColors';
 import { featureValues } from './activeNode';
+import {
+  ChildLegendStrip,
+  ChildStylePanel,
+  InspectorTabPanel,
+  InspectorTabStrip,
+} from './ChildStyle';
 import { ColorTargetName, OrthoWarning, PoseMatrix, Table } from './FeatureTable';
 import { genericRow, type RowSpec } from './featureRows';
 import { fmt, fmtVec } from './format';
 import { GlyphView, type GlyphContent } from './GlyphView';
+import { useChildLook, useInspectorTab } from './useChildStyle';
 
 const ENCODING_NOTE: Record<ObjectIdEncoding, string> = {
   sumOrd: 'sum(ord) (pre-v0.50 encoding)',
@@ -40,10 +49,21 @@ const LM_ORDER = [
   'pose_fully_defined',
 ];
 
+/** Ring marking `location_rel_model` (matches the ring in the child preview). */
+function AnchorRing() {
+  return (
+    <span
+      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2 border-select"
+      aria-hidden="true"
+    />
+  );
+}
+
 /**
- * LM-channel node view: glyph (child triad + posed child preview), feature table with decoded
- * `object_id`, child-overlay toggle and "Open in LM s →" (spec Phase 4 "LM feature table",
- * "Child overlay", "Ambiguous child ids").
+ * LM-channel node view: glyph (child triad + posed child preview with its legend and the
+ * `location_rel_model` ring), FEATURES / COLOR / DISPLAY tabs (feature table with decoded
+ * `object_id`; child colors and display), child-overlay toggle and "Open in LM s →" (spec Phase 4
+ * "LM feature table", "Child overlay", "Ambiguous child ids").
  */
 export function LmPanel({
   model,
@@ -87,6 +107,11 @@ export function LmPanel({
   const hasPoints = useMemo(() => (child ? childHasPoints(child) : false), [child]);
   const canOverlay = !!child && !!pose && hasPoints;
   const approximate = !pose?.locationRelModel;
+  const look = useChildLook(model, child);
+  const theme = useThemeColors();
+  // The ring shows where this node sits on the child: needs a drawn child and l.
+  const anchor = child && hasPoints ? pose?.locationRelModel : undefined;
+  const [hoverAnchor, setHoverAnchor] = useState(false);
 
   // Never leave the overlay on while there is no (unambiguous) child to show.
   useEffect(() => {
@@ -94,22 +119,26 @@ export function LmPanel({
   }, [overlayChild, canOverlay, setOverlayChild]);
 
   // Viewport child overlay: posed child cloud in overlayGroup (child of modelFrameGroup).
+  // `look` changes one frame after a theme change (useThemeColors), so --viewport is current.
   useEffect(() => {
-    if (!viewer || !overlayChild || !child || !pose) return;
-    const pts = buildChildCloud(child);
-    if (!pts) return;
-    placeChildCloud(pts, pose, child.centroid);
-    viewer.overlayGroup.add(pts);
-    return () => disposeObject(pts);
-  }, [viewer, overlayChild, child, pose]);
+    if (!viewer || !overlayChild || !child || !pose || !look) return;
+    const obj = buildChildObject(child, look, cssToRgb(readToken('--viewport')));
+    if (!obj) return;
+    placeChildCloud(obj, pose, child.centroid);
+    viewer.overlayGroup.add(obj);
+    return () => disposeObject(obj);
+  }, [viewer, overlayChild, child, pose, look]);
 
   const row9 = useMemo(() => {
     const v = featureValues(c, i, 'pose_vectors');
     return v && v.length >= 9 ? Array.from(v.subarray(0, 9)) : undefined;
   }, [c, i]);
   const content = useMemo<GlyphContent | null>(
-    () => (row9 ? { kind: 'lm', row9, child: child ?? null } : null),
-    [row9, child],
+    () =>
+      row9
+        ? { kind: 'lm', row9, child: child && look ? { graph: child, look } : null, anchor }
+        : null,
+    [row9, child, look, anchor],
   );
 
   // Hint shown when overlay / open are unavailable.
@@ -122,6 +151,7 @@ export function LmPanel({
   const overlayHint =
     disabledHint ??
     (!pose ? 'Node has no usable pose' : !hasPoints ? 'child graph has no points' : null);
+  const tab = useInspectorTab(!!child);
 
   const rows: RowSpec[] = [];
   const all = Object.keys(c.features);
@@ -185,12 +215,33 @@ export function LmPanel({
       });
     } else if (f === 'location_rel_model') {
       const v = featureValues(c, i, f)!;
-      rows.push({
-        key: f,
-        label: <span>location_rel_model</span>,
-        sub: 'child frame',
-        value: fmtVec(v),
-      });
+      rows.push(
+        anchor
+          ? {
+              key: f,
+              label: <span>location_rel_model</span>,
+              sub: (
+                <span className="inline-flex items-center gap-1">
+                  child frame ·{' '}
+                  <span className="inline-block h-2 w-2 rounded-full border border-select" />
+                  in preview
+                </span>
+              ),
+              value: (
+                <span className="inline-flex items-center gap-1.5 text-select">
+                  <AnchorRing />
+                  {fmtVec(v)}
+                </span>
+              ),
+              onHover: setHoverAnchor,
+            }
+          : {
+              key: f,
+              label: <span>location_rel_model</span>,
+              sub: 'child frame',
+              value: fmtVec(v),
+            },
+      );
     } else {
       const r = genericRow(c, i, f);
       if (r) rows.push(r);
@@ -213,6 +264,9 @@ export function LmPanel({
               'child axes in parent frame'
             )
           }
+          anchorLabel={anchor ? `#${i}` : undefined}
+          pulse={hoverAnchor && tab === 'features'}
+          footer={look && <ChildLegendStrip legend={look.coloring.legend} dim={theme.dim} />}
         />
         <div className="mt-1.5 flex gap-4 font-mono text-[11px] text-muted">
           {(['x', 'y', 'z'] as const).map((a) => (
@@ -224,14 +278,27 @@ export function LmPanel({
               child {a}
             </span>
           ))}
+          {anchor && (
+            <span className="inline-flex items-center gap-1">
+              <AnchorRing />
+              this node
+            </span>
+          )}
         </div>
       </div>
 
       <section>
-        <h3 className="mb-1.5 text-[11px] font-semibold tracking-wide text-muted uppercase">
-          Features
-        </h3>
-        <Table rows={rows} />
+        <InspectorTabStrip
+          tab={tab}
+          disabledTitle={child ? null : (disabledHint ?? 'No child object')}
+        />
+        <InspectorTabPanel tab={tab}>
+          {tab === 'features' || !child || !look ? (
+            <Table rows={rows} />
+          ) : (
+            <ChildStylePanel tab={tab} child={child} look={look} />
+          )}
+        </InspectorTabPanel>
       </section>
 
       <div className="grid grid-cols-2 gap-2">

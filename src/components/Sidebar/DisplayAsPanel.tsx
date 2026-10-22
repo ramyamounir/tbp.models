@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { edgeNodeCount, isEdgeChannel } from '../../model/edges';
+import type { ObjectGraph } from '../../model/types';
 import {
   EDGE_LENGTH_MAX,
   EDGE_LENGTH_MIN,
@@ -9,7 +10,7 @@ import {
   POINT_SIZE_MAX,
   POINT_SIZE_MIN,
   useViewerStore,
-  type DisplayOptions as Display,
+  type DisplayAsOptions,
 } from '../../state/store';
 import { DisplayName } from '../../util/DisplayName';
 
@@ -17,6 +18,7 @@ const NO_EDGE_CHANNEL =
   'No 2D-edge channel in this graph (needs an SM channel with pose_vectors, pose_fully_defined and edge_strength / coherence)';
 
 function Option({
+  name,
   checked,
   disabled,
   label,
@@ -24,6 +26,7 @@ function Option({
   title,
   children,
 }: {
+  name: string;
   checked: boolean;
   disabled?: boolean;
   label: string;
@@ -38,7 +41,7 @@ function Option({
       >
         <input
           type="radio"
-          name="display-as"
+          name={name}
           checked={checked}
           disabled={disabled}
           onChange={onSelect}
@@ -97,35 +100,63 @@ function Slider({
   );
 }
 
-/**
- * "Display as": Points (every node a dot) or Edges (nodes of 2D-edge channels drawn as a segment
- * along the detected edge tangent, see src/model/edges.ts; other nodes stay dots).
- */
+/** "Display as" of the displayed graph (sidebar DISPLAY tab). */
 export function DisplayAsPanel() {
   const model = useViewerStore((s) => s.model);
   const lmId = useViewerStore((s) => s.lmId);
   const graphId = useViewerStore((s) => s.graphId);
   const display = useViewerStore((s) => s.display);
   const setDisplay = useViewerStore((s) => s.setDisplay);
-  const set = (patch: Partial<Display>) => setDisplay(patch);
   const graph = getGraph(model, lmId, graphId);
+  if (!graph) return <p className="text-xs text-faint">—</p>;
+  return (
+    <DisplayAsChoices
+      graph={graph}
+      display={display}
+      onChange={setDisplay}
+      name="display-as"
+      ariaLabel="Display as"
+    />
+  );
+}
+
+/**
+ * "Display as" for `graph` (the displayed graph in the sidebar, the child object in the
+ * inspector): Points (every node a dot) or Edges (nodes of 2D-edge channels drawn as a segment
+ * along the detected edge tangent, see src/model/edges.ts; other nodes stay dots). `display` must
+ * be valid for `graph` (`validateDisplayAs`); `name` is the radio group name.
+ */
+export function DisplayAsChoices({
+  graph,
+  display,
+  onChange: set,
+  name,
+  ariaLabel,
+}: {
+  graph: ObjectGraph;
+  display: DisplayAsOptions;
+  onChange(patch: Partial<DisplayAsOptions>): void;
+  name: string;
+  ariaLabel: string;
+}) {
   const edgeChannels = useMemo(
     () =>
-      graph
-        ? graph.channels
-            .filter(isEdgeChannel)
-            .map((c) => ({ channel: c.channel, edges: edgeNodeCount(c), n: c.n }))
-        : [],
+      graph.channels
+        .filter(isEdgeChannel)
+        .map((c) => ({ channel: c.channel, edges: edgeNodeCount(c), n: c.n })),
     [graph],
   );
-
-  if (!graph) return <p className="text-xs text-faint">—</p>;
 
   const canEdges = edgeChannels.length > 0;
   const edges = display.displayAs === 'edges';
   return (
-    <div role="radiogroup" aria-label="Display as">
-      <Option checked={!edges} label="Points" onSelect={() => setDisplay({ displayAs: 'points' })}>
+    <div role="radiogroup" aria-label={ariaLabel}>
+      <Option
+        name={name}
+        checked={!edges}
+        label="Points"
+        onSelect={() => set({ displayAs: 'points' })}
+      >
         <span className={sub}>every node as a dot</span>
         {!edges && (
           <Slider
@@ -141,11 +172,12 @@ export function DisplayAsPanel() {
         )}
       </Option>
       <Option
+        name={name}
         checked={edges}
         disabled={!canEdges}
         title={canEdges ? undefined : NO_EDGE_CHANNEL}
         label="Edges"
-        onSelect={() => setDisplay({ displayAs: 'edges' })}
+        onSelect={() => set({ displayAs: 'edges' })}
       >
         {canEdges ? (
           <div className="flex flex-col gap-1">

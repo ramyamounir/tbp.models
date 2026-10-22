@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ChannelGraph, ModelFile, ObjectGraph } from '../model/types';
-import { DEFAULT_DISPLAY, useViewerStore, validateColorMode } from './store';
+import { stepNode } from './keyboard';
+import { DEFAULT_CHILD_DISPLAY, DEFAULT_DISPLAY, useViewerStore, validateColorMode } from './store';
 
 function channel(
   name: string,
@@ -211,6 +212,20 @@ describe('selection, tabs, display, theme', () => {
     expect(useViewerStore.getState().activeTab).toBeUndefined();
   });
 
+  it('stepping to the next node keeps the child overlay on; picking a node turns it off', () => {
+    const s = useViewerStore.getState();
+    s.setModel(model, 1, 'cube');
+    s.setSelection({ channel: 'learning_module_0', index: 0 });
+    s.setOverlayChild(true);
+    expect(stepNode(useViewerStore.getState(), 1)).toBe(true);
+    expect(useViewerStore.getState()).toMatchObject({
+      selection: { channel: 'learning_module_0', index: 1 },
+      overlayChild: true,
+    });
+    s.setSelection({ channel: 'learning_module_0', index: 0 });
+    expect(useViewerStore.getState().overlayChild).toBe(false);
+  });
+
   it('clamps pointSize to 1..32, edgeLengthPct to 1..30 and edgeWidthPx to 1..16', () => {
     const s = useViewerStore.getState();
     s.setDisplay({ pointSize: 50 });
@@ -280,5 +295,28 @@ describe('legend prefs', () => {
     expect(useViewerStore.getState().legend.categorical.hidden).toEqual([]);
     s.setModel(model, 1, 'cube');
     expect(useViewerStore.getState().legend.channel.order).toEqual([]);
+  });
+});
+
+describe('child settings and inspector tab', () => {
+  it('default to All / points / FEATURES; kept across graphs, reset by setModel', () => {
+    const s = useViewerStore.getState();
+    expect(s.childColorMode).toEqual({ kind: 'all' });
+    expect(s.childDisplay).toEqual(DEFAULT_CHILD_DISPLAY);
+    expect(s.inspectorTab).toBe('features');
+    s.setModel(model, 1, 'cube');
+    s.setChildColorMode({ kind: 'sm', feature: 'hsv' });
+    s.setChildDisplay({ displayAs: 'edges', edgeWidthPx: 99, pointSize: 0 });
+    s.setInspectorTab('color');
+    s.setInspectorTab('bogus' as never);
+    s.selectGraph(0, 'mug'); // not validated here: each child graph is checked where it is drawn
+    let st = useViewerStore.getState();
+    expect(st.childColorMode).toEqual({ kind: 'sm', feature: 'hsv' });
+    expect(st.childDisplay).toMatchObject({ displayAs: 'edges', edgeWidthPx: 16, pointSize: 1 });
+    expect(st.inspectorTab).toBe('color');
+    s.setModel(model, 1, 'cube');
+    st = useViewerStore.getState();
+    expect(st.childColorMode).toEqual({ kind: 'all' });
+    expect(st.childDisplay).toEqual(DEFAULT_CHILD_DISPLAY);
   });
 });
