@@ -261,3 +261,24 @@ describe('selection, tabs, display, theme', () => {
     expect(useViewerStore.getState().theme).toBe('system');
   });
 });
+
+describe('legend prefs', () => {
+  it('reorders, toggles hidden and shows all; kept across graphs, reset by setModel', () => {
+    const s = useViewerStore.getState();
+    s.setModel(model, 1, 'cube');
+    s.setLegendOrder('channel', ['b', 'a']);
+    s.setLegendOrder('channel', ['c', 'a']); // keys not given keep their place after
+    expect(useViewerStore.getState().legend.channel.order).toEqual(['c', 'a', 'b']);
+    s.toggleLegendHidden('categorical', 'x');
+    s.toggleLegendHidden('categorical', 'y');
+    s.toggleLegendHidden('categorical', 'x');
+    expect(useViewerStore.getState().legend.categorical.hidden).toEqual(['y']);
+    expect(useViewerStore.getState().legend.channel.hidden).toEqual([]);
+    s.selectGraph(0, 'mug');
+    expect(useViewerStore.getState().legend.categorical.hidden).toEqual(['y']);
+    s.showAllLegendRows('categorical');
+    expect(useViewerStore.getState().legend.categorical.hidden).toEqual([]);
+    s.setModel(model, 1, 'cube');
+    expect(useViewerStore.getState().legend.channel.order).toEqual([]);
+  });
+});

@@ -6,7 +6,7 @@
  * All colors here are display (sRGB) values in 0..1; the point shader writes them unchanged.
  */
 import * as THREE from 'three';
-import type { ColorMode } from '../state/store';
+import type { ColorMode, LegendPrefs, LegendPrefsByKind } from '../state/store';
 import { resolveObjectId } from '../model/hash';
 import type { ChannelGraph, ModelFile, ObjectGraph, ObjectIdResolution } from '../model/types';
 import { readToken } from '../theme/readToken';
@@ -242,8 +242,27 @@ export function objectIdLabel(res: ObjectIdResolution): string {
   }
 }
 
+/** Legend key of the "no LM data (dimmed)" row of the categorical legend. */
+export const DIMMED_KEY = '\u0000dimmed';
+
+/**
+ * `rows` sorted by the user's legend order: listed keys first, in that order; unlisted rows after
+ * them in their natural order.
+ */
+export function applyLegendOrder<T>(
+  rows: readonly T[],
+  key: (row: T) => string,
+  order: readonly string[],
+): T[] {
+  const rank = new Map(order.map((k, i) => [k, i]));
+  return rows
+    .map((row, i) => ({ row, i, r: rank.get(key(row)) ?? Infinity }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((x) => x.row);
+}
+
 export interface CategoricalRow {
-  key: string; // `${channel}\u0000${id}` (stable React key; never shown)
+  key: string; // `${channel}\u0000${id}` (stable React key and legend-prefs key; never shown)
   /** The raw `object_id` value shared by this row's nodes (shown as `(id)` in the legend). */
   id: number;
   color: RGB;
@@ -252,11 +271,21 @@ export interface CategoricalRow {
   /** Source LM `s` of the channel, shown as `LM s ·` when the graph has > 1 LM channel. */
   lmPrefix?: number;
   resolution: ObjectIdResolution;
+  hidden: boolean;
 }
 
 export type Legend =
-  | { kind: 'categorical'; title: string; rows: CategoricalRow[]; dimmedCount: number }
-  | { kind: 'channel'; rows: { channel: string; kind: 'sm' | 'lm'; color: RGB; count: number }[] }
+  | {
+      kind: 'categorical';
+      title: string;
+      rows: CategoricalRow[]; // in priority order (first = drawn on top)
+      dimmedCount: number;
+      dimmedHidden: boolean;
+    }
+  | {
+      kind: 'channel';
+      rows: { channel: string; kind: 'sm' | 'lm'; color: RGB; count: number; hidden: boolean }[]; // priority order
+    }
   | {
       kind: 'scalar';
       label: string;
@@ -271,6 +300,12 @@ export interface ChannelColoring {
   channel: string;
   colors: Float32Array; // n*3 sRGB
   dimmed: Uint8Array; // 1 = dimmed by the color mode (dim color, alpha 0.25, size × 0.7)
+  /**
+   * Draw priority, ≥ 0: of nodes that overlap on screen at about the same depth, the higher one is
+   * drawn on top. Legend rows rank by the user's order (top row highest); dimmed nodes are 0.
+   */
+  priority: Float32Array;
+  hidden: Uint8Array; // 1 = hidden from the legend (not drawn, not pickable)
 }
 
 export interface Coloring {
@@ -278,17 +313,31 @@ export interface Coloring {
   legend: Legend | null;
 }
 
-/** Colors every channel of `graph` for `mode`. */
+const NO_PREFS: LegendPrefs = { order: [], hidden: [] };
+
+/** Priority 1 for every colored node, 0 for dimmed ones (modes without legend rows). */
+function colorOverDimmed(out: ChannelColoring[]) {
+  for (const cc of out)
+    for (let i = 0; i < cc.priority.length; i++) cc.priority[i] = 1 - cc.dimmed[i];
+}
+
+/**
+ * Colors every channel of `graph` for `mode`. `prefs` (legend row order and hidden rows) apply to
+ * the categorical and channel-source legends.
+ */
 export function computeColoring(
   model: ModelFile,
   graph: ObjectGraph,
   mode: ColorMode,
   theme: ThemeColors,
+  prefs?: LegendPrefsByKind,
 ): Coloring {
   const out: ChannelColoring[] = graph.channels.map((c) => ({
     channel: c.channel,
     colors: new Float32Array(c.n * 3),
     dimmed: new Uint8Array(c.n),
+    priority: new Float32Array(c.n),
+    hidden: new Uint8Array(c.n),
   }));
   const put = (cc: ChannelColoring, i: number, rgb: RGB) => {
     cc.colors[i * 3] = rgb[0];
@@ -314,20 +363,26 @@ export function computeColoring(
     }
 
     case 'channel': {
+      const { order, hidden } = prefs?.channel ?? NO_PREFS;
       const colors = channelSourceColors(graph, theme);
+      const ranked = applyLegendOrder(graph.channels, (c) => c.channel, order);
       graph.channels.forEach((c, k) => {
         const rgb = colors.get(c.channel)!;
-        for (let i = 0; i < c.n; i++) put(out[k], i, rgb);
+        const cc = out[k];
+        cc.priority.fill(ranked.length - ranked.indexOf(c));
+        cc.hidden.fill(hidden.includes(c.channel) ? 1 : 0);
+        for (let i = 0; i < c.n; i++) put(cc, i, rgb);
       });
       return {
         channels: out,
         legend: {
           kind: 'channel',
-          rows: graph.channels.map((c) => ({
+          rows: ranked.map((c) => ({
             channel: c.channel,
             kind: c.kind,
             color: colors.get(c.channel)!,
             count: c.n,
+            hidden: hidden.includes(c.channel),
           })),
         },
       };
@@ -366,11 +421,14 @@ export function computeColoring(
           }
         }
       });
+      colorOverDimmed(out);
       return { channels: out, legend: null };
     }
 
     case 'lm': {
+      const { order, hidden } = prefs?.categorical ?? NO_PREFS;
       const rows = new Map<string, CategoricalRow>();
+      const nodeRows = graph.channels.map((c) => new Array<CategoricalRow | undefined>(c.n));
       const lmChannels = graph.channels.filter(
         (c) => c.kind === 'lm' && hasFeature(c, 'object_id'),
       );
@@ -399,11 +457,23 @@ export function computeColoring(
               channel: c.channel,
               lmPrefix,
               resolution: resolveObjectId(model, c.channel, raw),
+              hidden: hidden.includes(key),
             };
             rows.set(key, row);
           }
           row.count++;
+          nodeRows[k][i] = row;
           put(cc, i, row.color);
+        }
+      });
+      const ranked = applyLegendOrder([...rows.values()], (r) => r.key, order);
+      const priority = new Map(ranked.map((r, j) => [r, ranked.length - j]));
+      const dimmedHidden = hidden.includes(DIMMED_KEY);
+      out.forEach((cc, k) => {
+        for (let i = 0; i < cc.priority.length; i++) {
+          const row = nodeRows[k][i];
+          cc.priority[i] = row ? priority.get(row)! : 0;
+          cc.hidden[i] = (row ? row.hidden : dimmedHidden) ? 1 : 0;
         }
       });
       return {
@@ -411,8 +481,9 @@ export function computeColoring(
         legend: {
           kind: 'categorical',
           title: 'LM · object_id',
-          rows: [...rows.values()],
+          rows: ranked,
           dimmedCount,
+          dimmedHidden,
         },
       };
     }
@@ -434,6 +505,7 @@ export function computeColoring(
           put(cc, i, viridis(max === min ? 0.5 : (v - min) / (max - min)));
         }
       });
+      colorOverDimmed(out);
       return {
         channels: out,
         legend: {

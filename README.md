@@ -12,13 +12,16 @@ receives model data.
 2. Choose a learning module (LM) and an object graph in the sidebar, or with the breadcrumb pickers
    (`model.pt › LM 1 › 002_cube_tbp_horz · 929 nodes`; click the LM or graph crumb).
 3. Explore the graph:
-   - **Viewport**: orbit / pan / pick / rotate-object tools, Reset view, Fit, Ortho, axis gizmo,
-     status pill with the input channels and their node counts.
+   - **Viewport**: orbit / pan / pick / rotate-object tools (hold the middle mouse button to pan
+     with any tool), Reset view, Fit, Ortho, axis gizmo, status pill with the input channels and
+     their node counts.
    - **Object rotation**: x/y/z sliders or the rotate tool; points, normal glyphs and child overlays
      rotate together.
    - **Color points by**: All, SM feature (`hsv` / `rgba`), LM feature (`object_id`, with a legend
      that decodes ids to child graph names), Channel source, Scalar feature (any component of any
-     mapped feature, viridis).
+     mapped feature, viridis). In the object_id and channel-source legends, drag a row's grip (or
+     press ↑ / ↓ on it) to set color priority: where nodes overlap, the higher row is drawn on top.
+     The eye button hides a row's nodes ("Show all" brings them back).
    - **Display as**: Points (every node a dot, with the point size slider, 1–32 px) or Edges:
      nodes of a 2D sensor-module channel are drawn as short segments along their detected edge
      tangent (the second `pose_vectors` row), the other nodes stay dots; edge length (% of the

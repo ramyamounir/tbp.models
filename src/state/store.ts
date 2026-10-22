@@ -31,6 +31,15 @@ export interface DisplayOptions {
   edgeWidthPx: number;
 }
 export type Tool = 'orbit' | 'pan' | 'pick' | 'rotate';
+
+/** Legends whose rows the user can reorder (color priority) and hide: object_id and channel source. */
+export type LegendKind = 'categorical' | 'channel';
+/** Row keys (`CategoricalRow.key` / channel name / `DIMMED_KEY`); `order[0]` is drawn on top. */
+export interface LegendPrefs {
+  order: string[];
+  hidden: string[];
+}
+export type LegendPrefsByKind = Record<LegendKind, LegendPrefs>;
 export type Theme = 'light' | 'dark' | 'system';
 
 export interface ViewerState {
@@ -45,6 +54,7 @@ export interface ViewerState {
   colorMode: ColorMode;
   display: DisplayOptions;
   objectRotationDeg: [number, number, number]; // Euler XYZ, degrees
+  legend: LegendPrefsByKind; // kept across graph changes (row keys are channel names / ids); reset by setModel
   tool: Tool;
   ortho: boolean;
   overlayChild: boolean;
@@ -60,6 +70,10 @@ export interface ViewerState {
   setColorMode(mode: ColorMode): void;
   setDisplay(patch: Partial<DisplayOptions>): void;
   setRotation(deg: [number, number, number]): void;
+  /** `keys` = the legend rows in their new order (keys not in it keep their place after them). */
+  setLegendOrder(kind: LegendKind, keys: string[]): void;
+  toggleLegendHidden(kind: LegendKind, key: string): void;
+  showAllLegendRows(kind: LegendKind): void;
   setTool(tool: Tool): void;
   setOrtho(ortho: boolean): void;
   setActiveTab(channel: string | undefined): void;
@@ -77,6 +91,11 @@ export const DEFAULT_DISPLAY: DisplayOptions = {
   edgeLengthPct: 8, // tbp.teleop draws ±0.04 × half-extent, i.e. 8 % of the frame half-size
   edgeWidthPx: 2,
 };
+
+const emptyLegendPrefs = (): LegendPrefsByKind => ({
+  categorical: { order: [], hidden: [] },
+  channel: { order: [], hidden: [] },
+});
 
 export const POINT_SIZE_MIN = 1;
 export const POINT_SIZE_MAX = 32;
@@ -175,6 +194,7 @@ export const useViewerStore = create<ViewerState>()(
     colorMode: { kind: 'all' },
     display: { ...DEFAULT_DISPLAY },
     objectRotationDeg: [0, 0, 0],
+    legend: emptyLegendPrefs(),
     tool: 'orbit',
     ortho: false,
     overlayChild: false,
@@ -187,6 +207,7 @@ export const useViewerStore = create<ViewerState>()(
         graphId,
         loadGen: s.loadGen + 1,
         loading: undefined,
+        legend: emptyLegendPrefs(),
         error: undefined,
         ...graphChangeResets(model, lmId, graphId, s.colorMode, s.display),
       }));
@@ -256,6 +277,31 @@ export const useViewerStore = create<ViewerState>()(
 
     setRotation(deg) {
       set({ objectRotationDeg: [deg[0], deg[1], deg[2]] });
+    },
+
+    setLegendOrder(kind, keys) {
+      set((s) => {
+        const first = [...new Set(keys)];
+        const seen = new Set(first);
+        const order = [...first, ...s.legend[kind].order.filter((k) => !seen.has(k))];
+        return { legend: { ...s.legend, [kind]: { ...s.legend[kind], order } } };
+      });
+    },
+
+    toggleLegendHidden(kind, key) {
+      set((s) => {
+        const prev = s.legend[kind].hidden;
+        const hidden = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+        return { legend: { ...s.legend, [kind]: { ...s.legend[kind], hidden } } };
+      });
+    },
+
+    showAllLegendRows(kind) {
+      set((s) =>
+        s.legend[kind].hidden.length === 0
+          ? s
+          : { legend: { ...s.legend, [kind]: { ...s.legend[kind], hidden: [] } } },
+      );
     },
 
     setTool(tool) {

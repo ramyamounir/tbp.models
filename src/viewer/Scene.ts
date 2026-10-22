@@ -20,7 +20,13 @@ import type { ChannelGraph, ObjectGraph } from '../model/types';
 import { getGraph, useViewerStore, type Tool, type ViewerState } from '../state/store';
 import { readToken } from '../theme/readToken';
 import { displayName } from '../util/displayName';
-import { computeColoring, cssToRgb, readThemeColors, type ThemeColors } from './colors';
+import {
+  computeColoring,
+  cssToRgb,
+  readThemeColors,
+  type Coloring,
+  type ThemeColors,
+} from './colors';
 import { EdgeLayer } from './EdgeLayer';
 import { buildLmTriad, buildRingMarker, buildSmGlyph, disposeObject } from './Glyphs';
 import { NormalsLayer } from './NormalsLayer';
@@ -35,6 +41,8 @@ const FIT_MARGIN = 1.15;
 const SELECT_RING_PX = 24;
 const HOVER_RING_PX = 18;
 const ROTATE_RAD_PER_PX = 0.008;
+/** Smallest draw-priority depth step (PointCloudLayer), as a fraction of `R`. */
+const MIN_PRIORITY_LIFT = 0.005;
 
 /** Normalized pose row + feature value helpers on a channel row. */
 function featureSlice(c: ChannelGraph, i: number, name: string): Float64Array | undefined {
@@ -107,6 +115,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
   let normals: NormalsLayer | null = null;
   let R = 0.01;
   let themeColors: ThemeColors = readThemeColors();
+  let coloring: Coloring | null = null;
   let selectionGroup: THREE.Group | null = null;
   let hoverMarker: THREE.Points | null = null;
   let hover: PickHit | null = null;
@@ -123,23 +132,31 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
   function recolor() {
     const s = st();
     if (!graph || !s.model) return;
-    const coloring = computeColoring(s.model, graph, s.colorMode, themeColors);
+    const c = computeColoring(s.model, graph, s.colorMode, themeColors, s.legend);
+    coloring = c;
     const sel = s.selection;
     const bg = cssToRgb(readToken('--viewport'));
     layers.forEach((layer, k) => {
-      const cc = coloring.channels[k];
+      const cc = c.channels[k];
       const dimChannel =
         s.display.dimOthers && sel !== undefined && sel.channel !== layer.channel.channel;
-      layer.setColors(cc.colors, cc.dimmed, dimChannel);
+      layer.setColors(cc, dimChannel);
       const e = edges.find((x) => x.channel === layer.channel);
-      if (e) e.setColors(cc.colors, cc.dimmed, dimChannel, bg);
+      if (e) e.setColors(cc.colors, cc.dimmed, cc.hidden, dimChannel, bg);
     });
     normals?.setDimmed(s.display.dimOthers ? sel?.channel : undefined);
+    applyNormalsHidden();
+  }
+
+  function applyNormalsHidden() {
+    const c = coloring;
+    normals?.setHidden((ch) => c?.channels.find((cc) => cc.channel === ch)?.hidden);
   }
 
   function applyPointSize() {
     const d = st().display;
-    for (const l of layers) l.setPointSize(d.pointSize, renderer.getPixelRatio());
+    const h = size().h;
+    for (const l of layers) l.setPointSize(d.pointSize, renderer.getPixelRatio(), h);
     for (const e of edges) e.setWidth(d.edgeWidthPx);
   }
 
@@ -187,6 +204,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     modelFrameGroup.add(normals.group);
     const s = st();
     normals.setDimmed(s.display.dimOthers ? s.selection?.channel : undefined);
+    applyNormalsHidden();
   }
 
   function rebuildSelection() {
@@ -245,6 +263,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     edges = [];
     normals?.dispose();
     normals = null;
+    coloring = null;
     hover = null;
     picker.clearHover();
     rebuildHover();
@@ -252,7 +271,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     if (graph) {
       R = graphRadius(graph);
       for (const c of graph.channels) {
-        const layer = new PointCloudLayer(c, graph.centroid);
+        const layer = new PointCloudLayer(c, graph.centroid, MIN_PRIORITY_LIFT * R);
         layers.push(layer);
         modelFrameGroup.add(layer.points);
       }
@@ -366,43 +385,61 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     controls.update();
   }
 
+  const TOOL_CURSOR: Record<Tool, string> = {
+    orbit: 'default',
+    pan: 'move',
+    pick: 'crosshair',
+    rotate: 'grab',
+  };
+
+  /** Every tool pans while the middle button is held (the wheel still zooms). */
   function applyTool(tool: Tool) {
     controls.enabled = true;
     controls.enableZoom = true;
+    controls.enablePan = true;
     switch (tool) {
       case 'orbit':
         controls.enableRotate = true;
-        controls.enablePan = true;
         controls.mouseButtons = {
           LEFT: THREE.MOUSE.ROTATE,
-          MIDDLE: THREE.MOUSE.DOLLY,
+          MIDDLE: THREE.MOUSE.PAN,
           RIGHT: THREE.MOUSE.PAN,
         };
-        canvas.style.cursor = 'default';
         break;
       case 'pan':
         controls.enableRotate = true;
-        controls.enablePan = true;
         controls.mouseButtons = {
           LEFT: THREE.MOUSE.PAN,
-          MIDDLE: THREE.MOUSE.DOLLY,
+          MIDDLE: THREE.MOUSE.PAN,
           RIGHT: THREE.MOUSE.ROTATE,
         };
-        canvas.style.cursor = 'move';
         break;
       case 'pick':
-        controls.enableRotate = false;
-        controls.enablePan = false;
-        canvas.style.cursor = 'crosshair';
-        break;
       case 'rotate':
+        // Left is the picker's / rotate tool's; right does nothing.
         controls.enableRotate = false;
-        controls.enablePan = false;
-        canvas.style.cursor = 'grab';
+        controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: null };
         break;
     }
+    if (!middlePan) canvas.style.cursor = TOOL_CURSOR[tool];
     if (tool === 'pan' || tool === 'rotate') picker.clearHover();
   }
+
+  // ---- middle-button pan -----------------------------------------------------------------
+  let middlePan: number | null = null; // pointerId while the middle button is held
+  const onMiddleDown = (e: PointerEvent) => {
+    if (e.button !== 1 || e.pointerType !== 'mouse') return;
+    middlePan = e.pointerId;
+    canvas.style.cursor = 'move';
+  };
+  const onMiddleUp = (e: PointerEvent) => {
+    if (e.pointerId !== middlePan || (e.buttons & 4) !== 0) return;
+    middlePan = null;
+    canvas.style.cursor = TOOL_CURSOR[st().tool];
+  };
+  canvas.addEventListener('pointerdown', onMiddleDown);
+  canvas.addEventListener('pointerup', onMiddleUp);
+  canvas.addEventListener('pointercancel', onMiddleUp);
 
   // ---- picking ---------------------------------------------------------------------------
   const picker = new Picker({
@@ -475,6 +512,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
       const selChanged = s.selection !== p.selection;
       if (
         s.colorMode !== p.colorMode ||
+        s.legend !== p.legend ||
         s.display.dimOthers !== p.display.dimOthers ||
         (selChanged && s.display.dimOthers)
       ) {
@@ -516,6 +554,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     perspCam.aspect = w / h;
     perspCam.updateProjectionMatrix();
     updateOrthoFrustum();
+    applyPointSize();
   }
   const ro = new ResizeObserver(resize);
   ro.observe(container);
@@ -629,6 +668,9 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
       canvas.removeEventListener('pointermove', onRotMove);
       canvas.removeEventListener('pointerup', onRotUp);
       canvas.removeEventListener('pointercancel', onRotUp);
+      canvas.removeEventListener('pointerdown', onMiddleDown);
+      canvas.removeEventListener('pointerup', onMiddleUp);
+      canvas.removeEventListener('pointercancel', onMiddleUp);
       controls.dispose();
       for (const l of layers) l.dispose();
       layers = [];

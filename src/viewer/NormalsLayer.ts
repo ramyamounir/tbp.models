@@ -11,7 +11,12 @@ const DIMMED_OPACITY = 0.2;
 
 export class NormalsLayer {
   readonly group = new THREE.Group();
-  private readonly segments: { channel: string; lines: THREE.LineSegments }[] = [];
+  private readonly segments: {
+    channel: string;
+    lines: THREE.LineSegments;
+    positions: Float32Array; // every segment (6 floats each)
+    nodeIndex: Int32Array; // node row of each segment
+  }[] = [];
 
   constructor(graph: ObjectGraph, R: number, colorCss: string) {
     this.group.name = 'normals';
@@ -23,6 +28,7 @@ export class NormalsLayer {
         continue;
       const pv0 = ch.features.pose_vectors[0];
       const out = new Float32Array(ch.n * 6);
+      const nodeIndex = new Int32Array(ch.n);
       let k = 0;
       for (let i = 0; i < ch.n; i++) {
         const px = ch.pos[3 * i];
@@ -36,11 +42,13 @@ export class NormalsLayer {
         if (nl <= 1e-9) continue;
         const s = len / nl;
         out.set([px, py, pz, px + nx * s, py + ny * s, pz + nz * s], k);
+        nodeIndex[k / 6] = i;
         k += 6;
       }
       if (k === 0) continue;
+      const positions = out.slice(0, k);
       const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.BufferAttribute(out.slice(0, k), 3));
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions.slice(), 3));
       const material = new THREE.LineBasicMaterial({
         color: c,
         transparent: true,
@@ -49,7 +57,12 @@ export class NormalsLayer {
       });
       const lines = new THREE.LineSegments(geometry, material);
       lines.raycast = () => {};
-      this.segments.push({ channel: ch.channel, lines });
+      this.segments.push({
+        channel: ch.channel,
+        lines,
+        positions,
+        nodeIndex: nodeIndex.slice(0, k / 6),
+      });
       this.group.add(lines);
     }
   }
@@ -66,6 +79,23 @@ export class NormalsLayer {
     for (const { channel, lines } of this.segments) {
       const dim = selectedChannel !== undefined && channel !== selectedChannel;
       (lines.material as THREE.LineBasicMaterial).opacity = dim ? DIMMED_OPACITY : OPACITY;
+    }
+  }
+
+  /** Leave out the normals of nodes hidden from the legend (`hidden(channel)[i] === 1`). */
+  setHidden(hidden: (channel: string) => Uint8Array | undefined): void {
+    for (const { channel, lines, positions, nodeIndex } of this.segments) {
+      const mask = hidden(channel);
+      const attr = lines.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const out = attr.array as Float32Array;
+      let k = 0;
+      nodeIndex.forEach((i, j) => {
+        if (mask && mask[i] === 1) return;
+        out.set(positions.subarray(6 * j, 6 * j + 6), k);
+        k += 6;
+      });
+      attr.needsUpdate = true;
+      lines.geometry.setDrawRange(0, k / 3);
     }
   }
 

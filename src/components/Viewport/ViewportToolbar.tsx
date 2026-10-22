@@ -2,9 +2,13 @@ import { useViewerStore, type Tool } from '../../state/store';
 import { getViewer } from '../../viewer/sceneRegistry';
 
 const TOOLS: { tool: Tool; label: string; hint: string }[] = [
-  { tool: 'orbit', label: 'Orbit', hint: 'Drag to orbit, click a node to select' },
+  {
+    tool: 'orbit',
+    label: 'Orbit',
+    hint: 'Drag to orbit, middle-drag to pan, click a node to select',
+  },
   { tool: 'pan', label: 'Pan', hint: 'Drag to pan' },
-  { tool: 'pick', label: 'Pick', hint: 'Click a node to select (drag does nothing)' },
+  { tool: 'pick', label: 'Pick', hint: 'Click a node to select (middle-drag to pan)' },
   { tool: 'rotate', label: 'Rotate object', hint: 'Drag to rotate the object itself (R)' },
 ];
 

@@ -26,6 +26,8 @@ export class EdgeLayer {
   readonly lines: LineSegments2;
   private readonly geometry: LineSegmentsGeometry;
   private readonly material: LineMaterial;
+  /** Positions currently in the geometry (`segments.positions` unless some nodes are hidden). */
+  private drawnPositions: Float32Array | null = null;
 
   /** `halfLen` in model units (edge length = 2 × halfLen). */
   constructor(channel: ChannelGraph, halfLen: number) {
@@ -34,6 +36,7 @@ export class EdgeLayer {
     this.geometry = new LineSegmentsGeometry();
     if (this.segments.count > 0) {
       this.geometry.setPositions(this.segments.positions);
+      this.drawnPositions = this.segments.positions;
       this.geometry.setColors(new Float32Array(this.segments.count * 6));
     }
     this.material = new LineMaterial({
@@ -57,16 +60,31 @@ export class EdgeLayer {
   }
 
   /**
-   * `colors` (n*3 sRGB) and per-node dim flags, as for `PointCloudLayer.setColors`; `bg` is the
-   * viewport background used to fake per-node alpha.
+   * `colors` (n*3 sRGB), per-node dim flags and legend-hidden flags, as for
+   * `PointCloudLayer.setColors`; `bg` is the viewport background used to fake per-node alpha.
+   * Hidden nodes' segments are left out of the geometry.
    */
-  setColors(colors: Float32Array, dimmed: Uint8Array, dimWholeChannel: boolean, bg: RGB): void {
-    const { count, nodeIndex } = this.segments;
+  setColors(
+    colors: Float32Array,
+    dimmed: Uint8Array,
+    hidden: Uint8Array,
+    dimWholeChannel: boolean,
+    bg: RGB,
+  ): void {
+    const { count, nodeIndex, positions } = this.segments;
     if (count === 0) return;
-    const out = new Float32Array(count * 6);
+    let shown = 0;
+    for (let k = 0; k < count; k++) if (hidden[nodeIndex[k]] !== 1) shown++;
+    this.lines.visible = shown > 0;
+    if (shown === 0) return;
+    const out = new Float32Array(shown * 6);
+    const pos = shown === count ? positions : new Float32Array(shown * 6);
     const rgb = [0, 0, 0];
-    for (let k = 0; k < count; k++) {
+    for (let k = 0, j = -1; k < count; k++) {
       const i = nodeIndex[k];
+      if (hidden[i] === 1) continue;
+      j++;
+      if (pos !== positions) pos.set(positions.subarray(6 * k, 6 * k + 6), 6 * j);
       const dim = dimmed[i] === 1;
       for (let c = 0; c < 3; c++) {
         const v = colors[3 * i + c];
@@ -75,9 +93,13 @@ export class EdgeLayer {
       // Coloring is sRGB; LineMaterial multiplies vertex colors in the (linear) working color
       // space and converts on output, unlike the points shader which writes sRGB as-is.
       tmp.setRGB(rgb[0], rgb[1], rgb[2], THREE.SRGBColorSpace);
-      out[6 * k] = out[6 * k + 3] = tmp.r;
-      out[6 * k + 1] = out[6 * k + 4] = tmp.g;
-      out[6 * k + 2] = out[6 * k + 5] = tmp.b;
+      out[6 * j] = out[6 * j + 3] = tmp.r;
+      out[6 * j + 1] = out[6 * j + 4] = tmp.g;
+      out[6 * j + 2] = out[6 * j + 5] = tmp.b;
+    }
+    if (pos !== this.drawnPositions) {
+      this.geometry.setPositions(pos);
+      this.drawnPositions = pos;
     }
     this.geometry.setColors(out);
     this.material.opacity = dimWholeChannel ? DIM_ALPHA : 1;
