@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Inspector } from './components/Inspector/Inspector';
 import { Sidebar } from './components/Sidebar/Sidebar';
@@ -45,6 +46,7 @@ export default function App() {
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
       />
+      <DisclaimerBanner />
       <div className="flex min-h-0 flex-1">
         <Sidebar open={sidebarOpen} />
         {/* Viewport + inspector: side by side, or inspector as a bottom sheet under 1100 px. */}
