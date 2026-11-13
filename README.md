@@ -46,7 +46,8 @@ The theme follows the OS setting; the top-bar toggle cycles light → dark → s
 choice is the only thing the app stores (`localStorage` key `tbp-viewer-theme`).
 
 Below 1100 px width the inspector becomes a bottom sheet; the sidebar can be hidden with the
-top-left button.
+top-left button. On phone widths (640 px and below) the sidebar opens as a drawer over the
+viewport, and undo, redo, screenshot and the theme move into the top bar's `⋯` menu.
 
 ## Open files
 
@@ -116,7 +117,7 @@ the slots, settings, view mode and selected node (the button shows a dot while a
 - **Classes and colours**: equal (grey), changed (amber), only in A (red), only in B (green).
   Views: Overlay, Side by side (linked cameras), A only, B only. A legend in each pane lists the
   classes drawn there and toggles them; in Side by side each pane has its own.
-- **Summary panel**: verdict ("Equal within tolerance" / "Different"), node count bars and the class bar, a histogram of the distance from each A
+- **Summary panel**: verdict ("Equal within tolerance" / "Different"), a histogram of the distance from each A
   node to its nearest B node with the tolerance marked, per-property share outside tolerance and
   largest difference (click a property to colour by it), structural differences (channels or
   features present in one model only, differing feature widths), and **Copy A / B to…**.
@@ -124,8 +125,9 @@ the slots, settings, view mode and selected node (the button shows a dot while a
   glyph (A solid, B dashed) synced to the diff camera, and a Property / A / B / Δ table with the
   rows outside tolerance first and highlighted ("only differences" hides the rest).
 - **Keys** while the diff view is open: `←` / `→` previous / next difference, `F` fit, `Esc`
-  clears the node selection. Below 1100 px the panel becomes a bottom sheet and Side by side
-  stacks the panes.
+  clears the node selection. Below 1100 px the panel becomes a bottom sheet that its "Summary" handle
+  collapses to one row; on phone widths in portrait Side by side stacks the panes. In a short
+  pane the legend starts as a one-row chip of counts; tap it to expand.
 
 ## Supported formats
 

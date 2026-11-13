@@ -5,7 +5,25 @@
  */
 import { create } from 'zustand';
 
-export const useDiffUi = create<{ settingsOpen: boolean }>(() => ({ settingsOpen: false }));
+/** Below this window width or height the summary sheet starts collapsed (phones). */
+const SHEET_COLLAPSE_W = 640;
+const SHEET_COLLAPSE_H = 520;
+
+function initialSheetOpen(): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.innerWidth > SHEET_COLLAPSE_W && window.innerHeight > SHEET_COLLAPSE_H;
+}
+
+export const useDiffUi = create<{
+  settingsOpen: boolean;
+  /** Narrow layout only: whether the summary bottom sheet is expanded. */
+  sheetOpen: boolean;
+  /** The user's choice for the pane legends; undefined: expanded unless the pane is short. */
+  legendOpen: boolean | undefined;
+}>(() => ({ settingsOpen: false, sheetOpen: initialSheetOpen(), legendOpen: undefined }));
+
+export const toggleDiffSheet = () => useDiffUi.setState((s) => ({ sheetOpen: !s.sheetOpen }));
+export const setDiffLegendOpen = (open: boolean) => useDiffUi.setState({ legendOpen: open });
 
 export const openDiffSettings = () => useDiffUi.setState({ settingsOpen: true });
 export const closeDiffSettings = () => useDiffUi.setState({ settingsOpen: false });

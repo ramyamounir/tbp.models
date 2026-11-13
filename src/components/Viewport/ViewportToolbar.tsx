@@ -14,7 +14,7 @@ const TOOLS: { tool: Tool; label: string; hint: string }[] = [
 
 const group =
   'pointer-events-auto flex items-center gap-0.5 rounded-lg border border-border bg-panel p-1 shadow-sm';
-const btn = 'h-7 rounded-md px-2.5 text-[13px]';
+const btn = 'h-7 rounded-md px-2.5 text-[13px] whitespace-nowrap';
 const idle = 'text-text hover:bg-row-alt';
 const active = 'bg-accent-bg font-medium text-accent';
 

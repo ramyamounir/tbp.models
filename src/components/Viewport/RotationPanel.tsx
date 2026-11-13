@@ -16,10 +16,14 @@ const wrap = (d: number) => {
 export function RotationPanel() {
   const deg = useViewerStore((s) => s.objectRotationDeg);
   const setRotation = useViewerStore((s) => s.setRotation);
+  // Phones: the panel covers too much of the cloud, so it shows only with the Rotate object tool.
+  const rotating = useViewerStore((s) => s.tool === 'rotate');
   return (
     <section
       aria-label="Object rotation"
-      className="pointer-events-auto w-[230px] rounded-lg border border-border bg-panel px-3 py-2.5 shadow-sm"
+      className={`pointer-events-auto w-[230px] rounded-lg border border-border bg-panel px-3 py-2.5 shadow-sm ${
+        rotating ? '' : 'max-[640px]:hidden'
+      }`}
     >
       <div className="mb-1.5 flex items-center justify-between">
         <h3 className="text-[11px] font-semibold tracking-wide text-muted uppercase">

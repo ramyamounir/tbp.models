@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Menu, type MenuItem } from './ui/Menu';
 import { redoAction, undoAction } from '../state/editUi';
 import { unsavedCount, useViewerStore, type Theme } from '../state/store';
 import { getViewer, useViewer } from '../viewer/sceneRegistry';
@@ -62,7 +63,7 @@ function ThemeToggle() {
     <button
       type="button"
       onClick={() => setTheme(next)}
-      className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-[13px] text-text hover:bg-row-alt"
+      className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-[13px] text-text hover:bg-row-alt max-[640px]:hidden"
       title={`Theme: ${THEME_LABEL[theme]} (click for ${THEME_LABEL[next]})`}
       aria-label={`Theme: ${THEME_LABEL[theme]}. Switch to ${THEME_LABEL[next]}`}
     >
@@ -73,7 +74,7 @@ function ThemeToggle() {
 }
 
 /** Saves the main viewport canvas as PNG (no gizmo, legend or HTML overlays). */
-function ScreenshotButton() {
+function useScreenshot() {
   const viewer = useViewer();
   const diffOpen = useViewerStore((s) => s.diff.open);
   const [busy, setBusy] = useState(false);
@@ -90,13 +91,22 @@ function ScreenshotButton() {
       setBusy(false);
     }
   };
+  return {
+    run: onClick,
+    disabled: !viewer || busy || diffOpen,
+    title: diffOpen ? 'Close the diff view to save a screenshot' : 'Save the viewport as PNG',
+  };
+}
+
+function ScreenshotButton() {
+  const shot = useScreenshot();
   return (
     <button
       type="button"
-      onClick={onClick}
-      disabled={!viewer || busy || diffOpen}
-      title={diffOpen ? 'Close the diff view to save a screenshot' : 'Save the viewport as PNG'}
-      className="h-8 rounded-md border border-border bg-panel px-3 text-[13px] text-text hover:bg-row-alt disabled:cursor-not-allowed disabled:opacity-60"
+      onClick={shot.run}
+      disabled={shot.disabled}
+      title={shot.title}
+      className="h-8 rounded-md border border-border bg-panel px-3 text-[13px] text-text hover:bg-row-alt disabled:cursor-not-allowed disabled:opacity-60 max-[640px]:hidden"
     >
       Screenshot
     </button>
@@ -142,16 +152,21 @@ function DownloadIcon() {
   );
 }
 
-/** Undo / redo of the active file (per-file stacks; queued behind pending edits). */
-function UndoRedo() {
+function useUndoRedo() {
   const canUndo = useViewerStore(
     (s) => (s.files.find((f) => f.id === s.activeFileId)?.undo.length ?? 0) > 0,
   );
   const canRedo = useViewerStore(
     (s) => (s.files.find((f) => f.id === s.activeFileId)?.redo.length ?? 0) > 0,
   );
+  return { canUndo, canRedo };
+}
+
+/** Undo / redo of the active file (per-file stacks; queued behind pending edits). */
+function UndoRedo() {
+  const { canUndo, canRedo } = useUndoRedo();
   const cls =
-    'flex h-[30px] w-[30px] items-center justify-center rounded-md border border-border bg-panel text-text hover:bg-row-alt disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-panel';
+    'flex h-[30px] w-[30px] items-center justify-center rounded-md border border-border bg-panel text-text hover:bg-row-alt disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-panel max-[640px]:hidden';
   return (
     <>
       <button
@@ -262,6 +277,92 @@ function DiffButton() {
   );
 }
 
+/**
+ * Phone widths (640 px and below): undo, redo, screenshot and the theme move into this menu so
+ * the bar's primary buttons (open, export, diff) stay on screen.
+ */
+function OverflowMenu() {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const { canUndo, canRedo } = useUndoRedo();
+  const shot = useScreenshot();
+  const theme = useViewerStore((s) => s.theme);
+  const setTheme = useViewerStore((s) => s.setTheme);
+  const next = NEXT_THEME[theme];
+  const items: MenuItem[] = [
+    {
+      kind: 'item',
+      id: 'undo',
+      label: 'Undo',
+      icon: <UndoIcon />,
+      disabled: !canUndo,
+      onSelect: undoAction,
+    },
+    {
+      kind: 'item',
+      id: 'redo',
+      label: 'Redo',
+      icon: <UndoIcon redo />,
+      disabled: !canRedo,
+      onSelect: redoAction,
+    },
+    { kind: 'separator', id: 'sep1' },
+    {
+      kind: 'item',
+      id: 'screenshot',
+      label: 'Screenshot',
+      title: shot.title,
+      disabled: shot.disabled,
+      onSelect: () => void shot.run(),
+    },
+    {
+      kind: 'item',
+      id: 'theme',
+      label: `Theme: ${THEME_LABEL[theme]}`,
+      icon: <ThemeIcon theme={theme} />,
+      title: `Switch to ${THEME_LABEL[next]}`,
+      onSelect: () => setTheme(next),
+    },
+  ];
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}
+        aria-haspopup="menu"
+        aria-expanded={anchor !== null}
+        title="More"
+        aria-label="More"
+        className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-panel text-text hover:bg-row-alt max-[640px]:flex"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="5" cy="12" r="1.8" />
+          <circle cx="12" cy="12" r="1.8" />
+          <circle cx="19" cy="12" r="1.8" />
+        </svg>
+      </button>
+      {anchor && <Menu items={items} anchor={anchor} onClose={() => setAnchor(null)} />}
+    </>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  );
+}
+
 export interface TopBarProps {
   /** Opens the file picker. Wired by the Phase 2 loader; the button is disabled until then. */
   onOpenModel?: () => void;
@@ -291,7 +392,7 @@ function SidebarIcon() {
 
 export function TopBar({ onOpenModel, onExport, sidebarOpen, onToggleSidebar }: TopBarProps) {
   return (
-    <header className="flex h-[52px] shrink-0 items-center gap-3 border-b border-border bg-panel px-3 sm:gap-4 sm:px-4">
+    <header className="flex h-[52px] shrink-0 items-center gap-3 border-b border-border bg-panel px-3 max-[640px]:gap-2 sm:gap-4 sm:px-4">
       <button
         type="button"
         onClick={onToggleSidebar}
@@ -311,24 +412,32 @@ export function TopBar({ onOpenModel, onExport, sidebarOpen, onToggleSidebar }: 
           TBP Model Viewer
         </h1>
       </div>
-      <div className="h-6 w-px shrink-0 bg-border" aria-hidden="true" />
-      <Breadcrumb />
+      <div className="h-6 w-px shrink-0 bg-border max-[640px]:hidden" aria-hidden="true" />
+      {/* Phones have no room for the breadcrumb; the sidebar lists the same LMs and graphs. */}
+      <div className="flex min-w-0 flex-1 max-[640px]:invisible max-[640px]:overflow-hidden">
+        <Breadcrumb />
+      </div>
       <div className="flex shrink-0 items-center gap-2">
         <UndoRedo />
-        <div className="h-6 w-px shrink-0 bg-border" aria-hidden="true" />
+        <div className="h-6 w-px shrink-0 bg-border max-[640px]:hidden" aria-hidden="true" />
         <button
           type="button"
           onClick={onOpenModel}
           disabled={!onOpenModel}
           title="Open one or more model.pt files"
-          className="h-8 rounded-md border border-border bg-panel px-3 text-[13px] whitespace-nowrap text-text hover:bg-row-alt disabled:cursor-not-allowed disabled:opacity-60"
+          aria-label="Open model…"
+          className="flex h-8 items-center rounded-md border border-border bg-panel px-3 text-[13px] whitespace-nowrap text-text hover:bg-row-alt disabled:cursor-not-allowed disabled:opacity-60 max-[640px]:px-2.5"
         >
-          Open model…
+          <span className="hidden max-[640px]:block">
+            <FolderIcon />
+          </span>
+          <span className="max-[640px]:hidden">Open model…</span>
         </button>
         <ExportButton onExport={onExport} />
         <DiffButton />
         <ScreenshotButton />
         <ThemeToggle />
+        <OverflowMenu />
       </div>
     </header>
   );

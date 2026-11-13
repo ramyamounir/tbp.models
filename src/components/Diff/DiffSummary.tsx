@@ -1,7 +1,7 @@
 /**
  * Right panel of the diff view (spec multi-file-edit-diff Phase 7a "Minimal right panel",
  * extended in Phase 7b "Summary panel", mockup 08): the drop hint, the single slot's model, or
- * the full summary of the comparison (verdict, node bars, class bar, distance histogram,
+ * the full summary of the comparison (verdict, distance histogram,
  * properties, structure) with the footer (Settings…, Copy A to…, Copy B to…). While a node is
  * selected the node diff panel (`NodeDiff`) replaces the summary.
  */
@@ -55,81 +55,6 @@ function SingleSlot({ slot, resolved }: { slot: Slot; resolved: ResolvedSlot }) 
       </p>
       <p className="mt-2 text-[12px] leading-relaxed text-muted">{DROP_HINT}</p>
     </>
-  );
-}
-
-/** NODES: A and B counts as bars, then the stacked class bar and its line. */
-function NodesSection({ result }: { result: DiffResult }) {
-  const c = result.counts;
-  const top = Math.max(c.nA, c.nB, 1);
-  const d = c.nB - c.nA;
-  const total = c.equal + c.changed + c.onlyA + c.onlyB;
-  const parts: { n: number; cls: string; label: string }[] = [
-    { n: c.equal, cls: 'bg-diff-equal', label: 'equal' },
-    { n: c.changed, cls: 'bg-diff-changed', label: 'changed' },
-    { n: c.onlyA, cls: 'bg-diff-only-a', label: 'only in A' },
-    { n: c.onlyB, cls: 'bg-diff-only-b', label: 'only in B' },
-  ];
-  return (
-    <section aria-label="Nodes" className="border-t border-border pt-4">
-      <SectionLabel
-        right={
-          d !== 0 ? (
-            <span
-              className={`font-mono text-[11px] ${d > 0 ? 'text-diff-only-b' : 'text-diff-only-a'}`}
-            >
-              {d > 0 ? '+' : '−'}
-              {n0(Math.abs(d))} in B
-            </span>
-          ) : (
-            <span className="font-mono text-[11px] text-faint">same count</span>
-          )
-        }
-      >
-        Nodes
-      </SectionLabel>
-      <div className="mt-2 flex flex-col gap-1.5">
-        {(
-          [
-            ['A', c.nA, 'bg-slot-a', 'text-slot-a'],
-            ['B', c.nB, 'bg-slot-b', 'text-slot-b'],
-          ] as const
-        ).map(([k, n, bar, text]) => (
-          <div key={k} className="flex items-center gap-2">
-            <span className={`w-3 shrink-0 text-[11px] font-semibold ${text}`}>{k}</span>
-            <div className="h-2.5 min-w-0 flex-1">
-              <div
-                className={`h-full rounded-sm ${bar}`}
-                style={{ width: `${(n / top) * 100}%` }}
-              />
-            </div>
-            <span className="w-14 shrink-0 text-right font-mono text-[11px] text-text">
-              {n0(n)}
-            </span>
-          </div>
-        ))}
-      </div>
-      <div
-        className="mt-3 flex h-2.5 gap-px overflow-hidden rounded-sm bg-row-alt"
-        role="img"
-        aria-label={parts.map((p) => `${p.n} ${p.label}`).join(', ')}
-      >
-        {total > 0 &&
-          parts
-            .filter((p) => p.n > 0)
-            .map((p) => (
-              <div
-                key={p.label}
-                className={p.cls}
-                style={{ width: `${(p.n / total) * 100}%`, minWidth: 2 }}
-                title={`${n0(p.n)} ${p.label}`}
-              />
-            ))}
-      </div>
-      <p className="mt-1.5 font-mono text-[11px] text-muted">
-        {n0(c.equal)} equal · {n0(c.changed)} changed · {n0(c.onlyA)} only A · {n0(c.onlyB)} only B
-      </p>
-    </section>
   );
 }
 
@@ -409,7 +334,6 @@ export function DiffSummary({ status }: { status: DiffStatus }) {
               </span>
             </div>
           </div>
-          <NodesSection result={r} />
           <HistogramSection result={r} indexMode={match === 'index'} />
           <PropertiesSection result={r} />
           <StructureSection a={a} b={b} />

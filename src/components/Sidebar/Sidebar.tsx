@@ -163,7 +163,7 @@ export function Sidebar({
       id="app-sidebar"
       aria-label="Model and display options"
       hidden={!open}
-      className={`w-[272px] shrink-0 flex-col overflow-y-auto border-r border-border bg-panel ${open ? 'flex' : 'hidden'}`}
+      className={`w-[272px] shrink-0 flex-col overflow-y-auto border-r border-border bg-panel max-[640px]:absolute max-[640px]:inset-y-0 max-[640px]:left-0 max-[640px]:z-40 max-[640px]:max-w-[85vw] max-[640px]:shadow-xl ${open ? 'flex' : 'hidden'}`}
     >
       <SidebarSection title={fileCount > 0 ? `Open files · ${fileCount}` : 'Open files'}>
         {fileCount > 0 ? (

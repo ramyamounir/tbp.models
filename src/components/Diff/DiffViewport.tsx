@@ -51,7 +51,7 @@ const MODES: { mode: DiffMode; label: string }[] = [
 ];
 
 const group =
-  'pointer-events-auto flex items-center gap-0.5 rounded-lg border border-border bg-panel p-1 shadow-sm';
+  'pointer-events-auto flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-panel p-1 shadow-sm';
 const btn =
   'h-7 rounded-md px-2.5 text-[13px] whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50';
 const idle = 'text-text hover:bg-row-alt';
@@ -84,7 +84,7 @@ function DropPane({ slot, filledOther }: { slot: Slot; filledOther: boolean }) {
     <div
       {...props}
       aria-label={`Drop a model to set slot ${letter}`}
-      className={`relative flex min-h-0 min-w-0 flex-1 flex-col rounded-xl border-2 border-dashed border-accent bg-accent-bg ${
+      className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border-2 border-dashed border-accent bg-accent-bg ${
         over ? 'ring-2 ring-accent' : ''
       }`}
     >
@@ -156,17 +156,26 @@ function SlotHeader({ slot, resolved }: { slot: Slot; resolved: ResolvedSlot }) 
     <div
       {...props}
       aria-label={`Slot ${letter}`}
-      className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 ${
+      className={`@container flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 ${
         over ? 'bg-accent-bg ring-2 ring-accent' : ''
       }`}
     >
       <SlotBadge slot={slot} />
-      <div className="flex min-w-0 items-baseline gap-1 font-mono text-[12px] font-semibold text-text">
-        <DisplayName value={resolved.file.name} max={40} className="font-normal text-muted" />
-        <span className="shrink-0 font-normal text-faint">· LM {resolved.ref.lmId} ›</span>
+      {/* A narrow header (phone, or two slots in one Overlay header) keeps the model name and
+          drops the file, then the LM, then the node count. */}
+      <div className="flex min-w-0 flex-1 items-baseline gap-1 overflow-hidden font-mono text-[12px] font-semibold text-text">
+        <DisplayName
+          value={resolved.file.name}
+          max={40}
+          className="font-normal text-muted @max-[300px]:hidden"
+        />
+        <span className="shrink-0 font-normal text-faint @max-[300px]:hidden">·</span>
+        <span className="shrink-0 font-normal text-faint @max-[220px]:hidden">
+          LM {resolved.ref.lmId} ›
+        </span>
         <DisplayName value={resolved.ref.graphId} max={60} />
       </div>
-      <span className="ml-auto shrink-0 font-mono text-[11px] text-faint">
+      <span className="shrink-0 font-mono text-[11px] text-faint @max-[260px]:hidden">
         {graphNodeCount(resolved.graph).toLocaleString('en-US')} nodes
       </span>
       <button
@@ -421,14 +430,14 @@ export function DiffViewport({ status }: { status: DiffStatus }) {
   let body: ReactNode;
   if (status.status === 'empty') {
     body = (
-      <div className="flex min-h-0 flex-1 gap-3 max-[1100px]:min-h-[360px] max-[1100px]:flex-col">
+      <div className="flex min-h-0 flex-1 gap-3 max-[640px]:flex-col max-[640px]:gap-2">
         <DropPane slot="a" filledOther={false} />
         <DropPane slot="b" filledOther={false} />
       </div>
     );
   } else if (filledSlot) {
     body = (
-      <div className="flex min-h-0 flex-1 gap-3 max-[1100px]:min-h-[360px] max-[1100px]:flex-col">
+      <div className="flex min-h-0 flex-1 gap-3 max-[640px]:flex-col max-[640px]:gap-2">
         {filledSlot === 'b' && <DropPane key="drop-a" slot="a" filledOther />}
         {paneEls}
         {filledSlot === 'a' && <DropPane key="drop-b" slot="b" filledOther />}
@@ -437,8 +446,8 @@ export function DiffViewport({ status }: { status: DiffStatus }) {
   } else {
     body = (
       <div
-        className={`relative flex min-h-0 flex-1 gap-3 max-[1100px]:min-h-[220px] ${
-          mode === 'side' ? 'max-[1100px]:min-h-[360px] max-[1100px]:flex-col' : ''
+        className={`relative flex min-h-0 flex-1 gap-3 max-[640px]:gap-2 ${
+          mode === 'side' ? 'portrait:max-[640px]:flex-col' : ''
         }`}
       >
         {paneEls}
@@ -459,7 +468,7 @@ export function DiffViewport({ status }: { status: DiffStatus }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       {hasScene && (
-        <div className="flex shrink-0 flex-wrap items-start gap-3">
+        <div className="no-scrollbar flex shrink-0 flex-wrap items-start gap-3 max-[640px]:flex-nowrap max-[640px]:gap-2 max-[640px]:overflow-x-auto">
           <div role="toolbar" aria-label="Diff tools" className={group}>
             {TOOLS.map((t) => (
               <button

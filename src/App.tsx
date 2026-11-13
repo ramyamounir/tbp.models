@@ -70,7 +70,8 @@ export default function App() {
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
       />
       <DisclaimerBanner />
-      <div className="flex min-h-0 flex-1">
+      {/* relative: on phones the sidebar is a drawer laid over the viewport. */}
+      <div className="relative flex min-h-0 flex-1">
         <Sidebar open={sidebarOpen} onOpenModel={openPicker} />
         {/* Viewport + inspector: side by side, or inspector as a bottom sheet under 1100 px. */}
         <div className={diffOpen ? 'hidden' : 'flex min-h-0 min-w-0 flex-1 max-[1100px]:flex-col'}>

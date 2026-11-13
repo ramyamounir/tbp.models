@@ -72,10 +72,11 @@ export function Viewport() {
       )}
 
       {hasGraph && (
-        <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-4">
-          <div className="flex items-start justify-between gap-3">
+        <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-4 max-[640px]:p-2">
+          {/* Phones: the two toolbars stack on the left instead of running off the right edge. */}
+          <div className="flex items-start justify-between gap-3 max-[640px]:flex-col max-[640px]:gap-2">
             <ToolBar />
-            <div className="flex flex-col items-end gap-3">
+            <div className="flex flex-col items-end gap-3 max-[640px]:items-start max-[640px]:gap-2">
               <ViewControls />
               <RotationPanel />
             </div>

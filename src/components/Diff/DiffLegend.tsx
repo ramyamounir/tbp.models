@@ -3,10 +3,19 @@
  * draws, with counts and eye toggles (Overlay: all four; a pane of one model: equal, changed and
  * that model's "only in" class). Hidden classes are shared by all panes. The property is chosen
  * in the summary's PROPERTIES list; while one is chosen the "changed" row names it.
+ *
+ * In a short pane (phones, stacked panes) the legend would cover the cloud, so it starts as a
+ * one-row chip of swatches and counts; tapping the chip expands it and the chevron collapses it
+ * again. The choice is shared by all panes.
  */
+import { useEffect, useRef, useState } from 'react';
 import { NodeClass, type DiffResult } from '../../diff/compare';
 import { classCounts, effectiveProperty } from '../../diff/viewClasses';
 import { useViewerStore } from '../../state/store';
+import { setDiffLegendOpen, useDiffUi } from './diffUi';
+
+/** Panes shorter than this start with the legend collapsed. */
+const SHORT_PANE_PX = 260;
 
 const iconProps = {
   width: 14,
@@ -69,50 +78,108 @@ export function DiffLegend({
     shown === 'any' ? undefined : result.properties.find((p) => p.key === shown)?.label;
   const counts = classCounts(classesA, classesB);
 
+  // Height of the pane's canvas area (the legend's positioned parent).
+  const probe = useRef<HTMLSpanElement>(null);
+  const [short, setShort] = useState(false);
+  useEffect(() => {
+    const host = probe.current?.parentElement;
+    if (!host || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setShort(host.clientHeight < SHORT_PANE_PX));
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, []);
+  const choice = useDiffUi((s) => s.legendOpen);
+  const open = choice ?? !short;
+
+  if (!open) {
+    return (
+      <>
+        <span ref={probe} hidden />
+        <button
+          type="button"
+          onClick={() => setDiffLegendOpen(true)}
+          aria-expanded={false}
+          title="Show the legend"
+          aria-label="Show the diff legend"
+          className="pointer-events-auto absolute bottom-2 left-2 z-10 flex h-7 max-w-[calc(100%-1rem)] items-center gap-2.5 rounded-lg border border-border bg-panel/90 px-2.5 shadow-sm backdrop-blur-sm"
+        >
+          {show.map((cls) => (
+            <span
+              key={cls}
+              className={`flex items-center gap-1 font-mono text-[11px] text-muted ${
+                hidden.includes(cls) ? 'opacity-40' : ''
+              }`}
+            >
+              <span className={`h-2 w-2 rounded-full ${CLASS_SWATCH[cls]}`} aria-hidden="true" />
+              {counts[cls].toLocaleString('en-US')}
+            </span>
+          ))}
+        </button>
+      </>
+    );
+  }
+
   return (
-    <div
-      role="group"
-      aria-label="Diff legend"
-      className="pointer-events-auto absolute bottom-3 left-3 z-10 max-w-[calc(100%-1.5rem)] min-w-[200px] rounded-lg border border-border bg-panel/90 px-2.5 py-2 shadow-sm backdrop-blur-sm"
-    >
-      <ul className="flex flex-col gap-0.5">
-        {show.map((cls) => {
-          const off = hidden.includes(cls);
-          const label = CLASS_LABEL[cls];
-          return (
-            <li key={cls} className="flex h-6 items-center gap-2 text-[12px] text-text">
-              <span
-                className={`h-2.5 w-2.5 shrink-0 rounded-full ${CLASS_SWATCH[cls]} ${off ? 'opacity-40' : ''}`}
-                aria-hidden="true"
-              />
-              <span
-                className={`flex min-w-0 flex-1 items-baseline gap-1 ${off ? 'text-faint' : ''}`}
-              >
-                <span className="shrink-0">{label}</span>
-                {cls === NodeClass.Changed && propLabel !== undefined && (
-                  <>
-                    <span className="shrink-0 text-faint">·</span>
-                    <span className="truncate font-mono text-[11px] text-accent">{propLabel}</span>
-                  </>
-                )}
-              </span>
-              <span className="shrink-0 pl-2 font-mono text-[11px] text-muted">
-                {counts[cls].toLocaleString('en-US')}
-              </span>
-              <button
-                type="button"
-                onClick={() => toggleDiffHidden(cls)}
-                aria-pressed={!off}
-                title={off ? `Show ${label}` : `Hide ${label}`}
-                aria-label={off ? `Show ${label}` : `Hide ${label}`}
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted hover:bg-row-alt hover:text-text"
-              >
-                <EyeIcon off={off} />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+    <>
+      <span ref={probe} hidden />
+      <div
+        role="group"
+        aria-label="Diff legend"
+        className="pointer-events-auto absolute bottom-3 left-3 z-10 max-w-[calc(100%-1.5rem)] min-w-[200px] rounded-lg border border-border bg-panel/90 px-2.5 py-2 shadow-sm backdrop-blur-sm max-[640px]:bottom-2 max-[640px]:left-2"
+      >
+        <button
+          type="button"
+          onClick={() => setDiffLegendOpen(false)}
+          aria-expanded
+          title="Collapse the legend"
+          aria-label="Collapse the diff legend"
+          className="absolute -top-2.5 -right-2.5 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-panel text-muted shadow-sm hover:text-text"
+        >
+          <svg {...iconProps} width={11} height={11} strokeWidth={2.6}>
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+        <ul className="flex flex-col gap-0.5">
+          {show.map((cls) => {
+            const off = hidden.includes(cls);
+            const label = CLASS_LABEL[cls];
+            return (
+              <li key={cls} className="flex h-6 items-center gap-2 text-[12px] text-text">
+                <span
+                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${CLASS_SWATCH[cls]} ${off ? 'opacity-40' : ''}`}
+                  aria-hidden="true"
+                />
+                <span
+                  className={`flex min-w-0 flex-1 items-baseline gap-1 ${off ? 'text-faint' : ''}`}
+                >
+                  <span className="shrink-0">{label}</span>
+                  {cls === NodeClass.Changed && propLabel !== undefined && (
+                    <>
+                      <span className="shrink-0 text-faint">·</span>
+                      <span className="truncate font-mono text-[11px] text-accent">
+                        {propLabel}
+                      </span>
+                    </>
+                  )}
+                </span>
+                <span className="shrink-0 pl-2 font-mono text-[11px] text-muted">
+                  {counts[cls].toLocaleString('en-US')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleDiffHidden(cls)}
+                  aria-pressed={!off}
+                  title={off ? `Show ${label}` : `Hide ${label}`}
+                  aria-label={off ? `Show ${label}` : `Hide ${label}`}
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted hover:bg-row-alt hover:text-text"
+                >
+                  <EyeIcon off={off} />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </>
   );
 }

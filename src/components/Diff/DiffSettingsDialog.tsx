@@ -275,7 +275,9 @@ function TolRow({ r }: { r: RowSpec }) {
           {r.kind && <KindChip kind={r.kind} />}
         </span>
       </td>
-      <td className={`py-2 pr-2 text-[12px] text-muted ${off ? 'opacity-50' : ''}`}>
+      <td
+        className={`py-2 pr-2 text-[12px] text-muted max-[640px]:hidden ${off ? 'opacity-50' : ''}`}
+      >
         {r.only ? `only in ${r.only}` : r.metric}
       </td>
       <td className="py-2 pr-3">
@@ -303,7 +305,7 @@ function TolRow({ r }: { r: RowSpec }) {
                 value={Math.min(sliderMax, t.value)}
                 disabled={off}
                 onChange={(e) => t.onChange(Number(e.currentTarget.value))}
-                className="h-1 min-w-[60px] flex-1 accent-[var(--accent)]"
+                className="h-1 min-w-[60px] flex-1 accent-[var(--accent)] max-[640px]:hidden"
               />
               <span className="w-[56px] shrink-0 text-right text-[11px] text-faint">
                 {t.after ?? (t.value === 0 ? 'exact' : '')}
@@ -613,12 +615,12 @@ export function DiffSettingsDialog() {
             </div>
           </div>
           <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full min-w-[600px] border-collapse text-left">
+            <table className="w-full min-w-[600px] border-collapse text-left max-[640px]:min-w-0">
               <thead className="bg-row-alt text-[11px] text-muted">
                 <tr>
                   <th className="w-8 py-1.5 pl-3" aria-label="Compare" />
                   <th className="py-1.5 pr-2 font-medium">Property</th>
-                  <th className="py-1.5 pr-2 font-medium">Metric</th>
+                  <th className="py-1.5 pr-2 font-medium max-[640px]:hidden">Metric</th>
                   <th className="py-1.5 pr-3 font-medium">Tolerance</th>
                 </tr>
               </thead>
