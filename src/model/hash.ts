@@ -12,10 +12,13 @@ import type {
   ObjectIdResolution,
 } from './types';
 
-/** Python `sum(ord(c) for c in name)` (UTF-16 code units; identical for ASCII ids). */
+/**
+ * Python `sum(ord(c) for c in name)`: sums Unicode code points (a `for…of` over a string yields
+ * one code point per astral character). A lone surrogate counts as its own code unit value.
+ */
 export function sumOrd(name: string): number {
   let s = 0;
-  for (let k = 0; k < name.length; k++) s += name.charCodeAt(k);
+  for (const ch of name) s += ch.codePointAt(0)!;
   return s;
 }
 

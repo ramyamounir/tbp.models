@@ -52,6 +52,34 @@ export class NumpyDtype extends Buildable {
   }
 }
 
+/** Element type of a dtype the exporter can rewrite in place (spec multi-file-edit-diff Phase 4b). */
+export interface ExportDtype {
+  kind: 'f' | 'i' | 'u';
+  size: 1 | 2 | 4 | 8;
+  littleEndian: boolean;
+}
+
+/**
+ * Decodes a dtype (`numpy.dtype(code, …)` plus its BUILD byte order) with the loader's own
+ * rules, for the exporter: float of 4 / 8 bytes and signed / unsigned integers of 1 / 2 / 4 / 8
+ * bytes in a byte order the loader reads. Returns undefined for anything else (float16, bool,
+ * complex, object, structured, big-endian), which the loader either rejects or the exporter
+ * cannot rewrite. Does not change what the loader accepts.
+ */
+export function parseDtype(code: string, byteOrder = '='): ExportDtype | undefined {
+  if (!BYTE_ORDERS.has(byteOrder)) return undefined;
+  const d = new NumpyDtype(code);
+  d.byteOrder = byteOrder;
+  if (!d.numeric || d.bigEndian) return undefined;
+  if (d.kind === 'f' && (d.itemsize === 4 || d.itemsize === 8)) {
+    return { kind: 'f', size: d.itemsize, littleEndian: true };
+  }
+  if ((d.kind === 'i' || d.kind === 'u') && [1, 2, 4, 8].includes(d.itemsize)) {
+    return { kind: d.kind, size: d.itemsize as 1 | 2 | 4 | 8, littleEndian: true };
+  }
+  return undefined;
+}
+
 /** Array created empty by `_reconstruct`, filled by BUILD `(version, shape, dtype, isFortran, raw)`. */
 export class NumpyArray extends Buildable {
   shape: number[] = [];

@@ -11,6 +11,8 @@ import type { PointCloudLayer } from './PointCloudLayer';
 export interface PickHit {
   channel: string;
   index: number;
+  /** The layer that was hit (several layers can share a channel name in a diff overlay). */
+  layer?: PointCloudLayer;
 }
 
 export interface PickerOptions {
@@ -90,7 +92,11 @@ export class Picker {
           ray < best.ray - 1e-12 ||
           (Math.abs(ray - best.ray) <= 1e-12 && it.distance < best.depth)
         ) {
-          best = { hit: { channel: layer.channel.channel, index: i }, ray, depth: it.distance };
+          best = {
+            hit: { channel: layer.channel.channel, index: i, layer },
+            ray,
+            depth: it.distance,
+          };
         }
       }
     }
@@ -113,7 +119,8 @@ export class Picker {
       (hit &&
         this.hovered &&
         hit.channel === this.hovered.channel &&
-        hit.index === this.hovered.index);
+        hit.index === this.hovered.index &&
+        hit.layer === this.hovered.layer);
     if (same) return;
     this.hovered = hit;
     this.opts.onHover(hit);

@@ -10,7 +10,13 @@
  * parse.ts then reads the tensor storages they reference; `buildLms()` (sync) materializes and
  * validates each graph.
  */
-import type { ChannelGraph, LmEntry, ObjectGraph, UnreadableGraph } from '../model/types';
+import type {
+  ChannelGraph,
+  LmEntry,
+  ObjectGraph,
+  OrderItem,
+  UnreadableGraph,
+} from '../model/types';
 import { ParseError } from './errors';
 import { NumpyArray, bytesToFloat64, checkAlloc, numpyArrayData } from './numpy';
 import { Placeholder, own, type PyValue } from './pyvalue';
@@ -30,6 +36,8 @@ interface RawChannel {
 
 interface RawGraph {
   graphId: string;
+  /** Position in `graph_memory.entries()` (readable and unreadable share one counter). */
+  entry: number;
   channels: RawChannel[];
 }
 
@@ -37,6 +45,8 @@ interface RawLm {
   lmId: number;
   graphs: RawGraph[];
   unreadable: UnreadableGraph[];
+  /** No lm_dict key on disk: filled in to keep `lms` dense. */
+  gap: boolean;
 }
 
 export interface WalkedModel {
@@ -123,15 +133,21 @@ export function walkModel(root: PyValue): WalkedModel {
   const count = byId.size === 0 ? 0 : Math.max(...byId.keys()) + 1;
   const lms: RawLm[] = [];
   for (let lmId = 0; lmId < count; lmId++) {
-    const lm: RawLm = { lmId, graphs: [], unreadable: [] };
+    const gap = !byId.has(lmId);
+    const lm: RawLm = { lmId, graphs: [], unreadable: [], gap };
     lms.push(lm);
-    if (!byId.has(lmId)) continue; // gap in lm_dict keys: empty LM keeps lms dense
+    if (gap) continue; // gap in lm_dict keys: empty LM keeps lms dense
     const gm = own(byId.get(lmId), 'graph_memory');
     if (!(gm instanceof Map))
       throw new ParseError(`Not a Monty model: lm_dict[${lmId}].graph_memory`);
+    // `entry` counts gm.entries() positions (= index among unique keys; the VM collapses a
+    // repeated key). The origin's fileId is stamped on the main thread after load.
+    let entry = -1;
     for (const [gk, channels] of gm.entries()) {
+      entry++;
+      const origin = { fileId: '', lmId, entry };
       if (typeof gk !== 'string') {
-        lm.unreadable.push({ graphId: keyLabel(gk), reason: 'graph id is not a string' });
+        lm.unreadable.push({ graphId: keyLabel(gk), reason: 'graph id is not a string', origin });
         continue;
       }
       try {
@@ -144,9 +160,9 @@ export function walkModel(root: PyValue): WalkedModel {
           raw.push(walkChannel(ck, objectModel));
         }
         if (raw.length === 0) throw new ParseError('graph has no channels');
-        lm.graphs.push({ graphId: gk, channels: raw });
+        lm.graphs.push({ graphId: gk, entry, channels: raw });
       } catch (err) {
-        lm.unreadable.push({ graphId: gk, reason: errMessage(err) });
+        lm.unreadable.push({ graphId: gk, reason: errMessage(err), origin });
       }
     }
   }
@@ -305,13 +321,27 @@ function centroidOf(channels: ChannelGraph[]): [number, number, number] {
   return k === 0 ? [0, 0, 0] : [sx / k, sy / k, sz / k];
 }
 
-/** Materialize and validate every graph; a failing graph becomes `unreadable`. */
+/**
+ * Materialize and validate every graph; a failing graph becomes `unreadable` and keeps its
+ * on-disk position in `order` (graph_memory order, readable and unreadable combined).
+ */
 export function buildLms(walked: WalkedModel): LmEntry[] {
-  return walked.lms.map((lm) => {
+  return walked.lms.map((lm): LmEntry => {
+    if (lm.gap) {
+      return {
+        lmId: lm.lmId,
+        graphIds: [],
+        graphs: new Map(),
+        unreadable: [],
+        order: [],
+        gap: true,
+      };
+    }
     const graphs = new Map<string, ObjectGraph>();
-    const graphIds: string[] = [];
     const unreadable = lm.unreadable.slice();
+    const readable: { graphId: string; entry: number }[] = [];
     for (const g of lm.graphs) {
+      const origin = { fileId: '', lmId: lm.lmId, entry: g.entry };
       try {
         const channels = g.channels.map(buildChannel);
         graphs.set(g.graphId, {
@@ -319,12 +349,35 @@ export function buildLms(walked: WalkedModel): LmEntry[] {
           graphId: g.graphId,
           channels,
           centroid: centroidOf(channels),
+          origin,
+          patches: [],
         });
-        graphIds.push(g.graphId);
+        readable.push({ graphId: g.graphId, entry: g.entry });
       } catch (err) {
-        unreadable.push({ graphId: g.graphId, reason: errMessage(err) });
+        unreadable.push({ graphId: g.graphId, reason: errMessage(err), origin });
       }
     }
-    return { lmId: lm.lmId, graphIds, graphs, unreadable };
+    unreadable.sort((a, b) => a.origin.entry - b.origin.entry);
+    const all: { entry: number; item: OrderItem }[] = [
+      ...readable.map((r) => ({
+        entry: r.entry,
+        item: { kind: 'r', graphId: r.graphId } as const,
+      })),
+      ...unreadable.map((u) => ({
+        entry: u.origin.entry,
+        item: { kind: 'u', origin: u.origin } as const,
+      })),
+    ];
+    all.sort((a, b) => a.entry - b.entry);
+    const order = all.map((a) => a.item);
+    const graphIds = order.flatMap((o) => (o.kind === 'r' ? [o.graphId] : []));
+    return {
+      lmId: lm.lmId,
+      graphIds,
+      graphs,
+      unreadable,
+      order,
+      origin: { fileId: '', lmId: lm.lmId },
+    };
   });
 }

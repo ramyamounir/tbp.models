@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bottomUpSenders, buildObjectIdIndex, resolveObjectId, sha256_24, sumOrd } from './hash';
 import type { ChannelGraph, LmEntry, ModelFile, ObjectGraph } from './types';
+import { testOrder, testOrigin } from '../loader/testFixture';
 
 function channel(name: string): ChannelGraph {
   return {
@@ -17,10 +18,18 @@ function channel(name: string): ChannelGraph {
 
 function lm(lmId: number, graphs: Record<string, string[]>): LmEntry {
   const map = new Map<string, ObjectGraph>();
-  for (const [graphId, chans] of Object.entries(graphs)) {
-    map.set(graphId, { lmId, graphId, channels: chans.map(channel), centroid: [0, 0, 0] });
-  }
-  return { lmId, graphIds: Object.keys(graphs), graphs: map, unreadable: [] };
+  Object.entries(graphs).forEach(([graphId, chans], i) => {
+    map.set(graphId, {
+      lmId,
+      graphId,
+      channels: chans.map(channel),
+      centroid: [0, 0, 0],
+      origin: testOrigin(lmId, i),
+      patches: [],
+    });
+  });
+  const graphIds = Object.keys(graphs);
+  return { lmId, graphIds, graphs: map, unreadable: [], order: testOrder(graphIds) };
 }
 
 async function model(lms: LmEntry[]): Promise<ModelFile> {

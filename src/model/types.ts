@@ -15,23 +15,53 @@ export interface ChannelGraph {
   nonFiniteRows: number; // rows of pos with a NaN/±Infinity coordinate (kept in pos; excluded from centroid/bounds)
 }
 
+/** On-disk position of a graph: file, lm_dict key, and index into graph_memory in pickle order. */
+export interface GraphOrigin {
+  fileId: string;
+  lmId: number;
+  entry: number;
+}
+/** Rewrite of object_id values in one LM channel of a graph ("Update references"). */
+export interface ObjectIdPatch {
+  channel: string;
+  from: number;
+  to: number;
+}
+
 export interface ObjectGraph {
   lmId: number;
   graphId: string;
   channels: ChannelGraph[];
   centroid: [number, number, number]; // centroid over finite pos rows only
+  origin: GraphOrigin;
+  patches: ObjectIdPatch[]; // [] unless references were rewritten
 }
 
 export interface UnreadableGraph {
-  graphId: string;
+  graphId: string; // keyLabel(key): display only, not necessarily unique
   reason: string;
+  origin: GraphOrigin;
 }
+
+/**
+ * One graph_memory entry of an LM, in list order. 'u' items are matched to `unreadable` by
+ * origin (lmId + entry), never by label.
+ */
+export type OrderItem = { kind: 'r'; graphId: string } | { kind: 'u'; origin: GraphOrigin };
 
 export interface LmEntry {
   lmId: number;
-  graphIds: string[]; // readable graphs only
+  graphIds: string[]; // readable graphs only, in the relative order of `order`
   graphs: Map<string, ObjectGraph>;
-  unreadable: UnreadableGraph[];
+  unreadable: UnreadableGraph[]; // sorted by origin.entry at load
+  /** undefined = created in the app (Add LM) or a gap. */
+  origin?: { fileId: string; lmId: number };
+  /**
+   * All entries in graph_memory order. Invariant: the 'r' items are exactly `graphIds` in order,
+   * the 'u' items are exactly `unreadable` (matched by origin.lmId + origin.entry) in order.
+   */
+  order: OrderItem[];
+  gap?: true; // filled-in index with no lm_dict key on disk; origin is undefined
 }
 
 export interface ModelFile {

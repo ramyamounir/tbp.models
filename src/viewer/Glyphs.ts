@@ -52,7 +52,7 @@ function overlayMaterial<M extends THREE.Material>(m: M): M {
   return m;
 }
 
-function arrow(dir: THREE.Vector3, length: number, css: string): THREE.Group {
+function arrow(dir: THREE.Vector3, length: number, css: string, dashed = false): THREE.Group {
   const g = new THREE.Group();
   const c = color(css);
   const headLen = length * 0.22;
@@ -61,7 +61,19 @@ function arrow(dir: THREE.Vector3, length: number, css: string): THREE.Group {
     new THREE.Vector3(0, 0, 0),
     dir.clone().multiplyScalar(length - headLen),
   ]);
-  const line = new THREE.Line(shaft, overlayMaterial(new THREE.LineBasicMaterial({ color: c })));
+  const line = new THREE.Line(
+    shaft,
+    overlayMaterial(
+      dashed
+        ? new THREE.LineDashedMaterial({
+            color: c,
+            dashSize: length * 0.07,
+            gapSize: length * 0.05,
+          })
+        : new THREE.LineBasicMaterial({ color: c }),
+    ),
+  );
+  if (dashed) line.computeLineDistances();
   line.renderOrder = RENDER_ORDER + 1;
   g.add(line);
   const cone = new THREE.Mesh(
@@ -152,6 +164,37 @@ export function buildLmTriad(
     g.add(arrow(v.divideScalar(len), scale, css[k]));
   });
   return g;
+}
+
+/**
+ * Paired pose glyph of the diff view's node diff (spec multi-file-edit-diff Phase 7b): the three
+ * `pose_vectors` rows of A drawn solid and those of B dashed, in the SM glyph colours (row 0 the
+ * normal at full length, rows 1 and 2 at 0.8). Either side may be null (an unpaired node).
+ * Returns the group and the tip of each drawn row (A's tip, else B's) for labelling.
+ */
+export function buildPairGlyph(
+  rowA: ArrayLike<number> | null,
+  rowB: ArrayLike<number> | null,
+  colors: GlyphColors = readGlyphColors(),
+): { group: THREE.Group; tips: (THREE.Vector3 | null)[] } {
+  const g = new THREE.Group();
+  g.name = 'pair-glyph';
+  const css = [colors.normal, colors.curv1, colors.curv2];
+  const tips: (THREE.Vector3 | null)[] = [null, null, null];
+  for (let k = 0; k < 3; k++) {
+    const len = k === 0 ? 1 : 0.8;
+    const b = rowB ? row(rowB, k) : null;
+    if (b) {
+      g.add(arrow(b, len, css[k], true));
+      tips[k] = b.clone().multiplyScalar(len);
+    }
+    const a = rowA ? row(rowA, k) : null;
+    if (a) {
+      g.add(arrow(a, len, css[k]));
+      tips[k] = a.clone().multiplyScalar(len);
+    }
+  }
+  return { group: g, tips };
 }
 
 const ringVertex = /* glsl */ `

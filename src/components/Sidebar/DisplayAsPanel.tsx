@@ -58,7 +58,7 @@ function Option({
 
 const sub = 'font-mono text-[11px] text-muted';
 
-function Slider({
+export function Slider({
   label,
   value,
   unit,

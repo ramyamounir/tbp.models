@@ -26,6 +26,11 @@ export interface ViewerScene {
   fit(): void;
   /** Default camera direction + fit(); does not touch objectGroup rotation. */
   resetView(): void;
+  /**
+   * false: stop requesting animation frames (the diff view hides this viewport); true: resize to
+   * the container, render one frame and restart the loop. Idempotent.
+   */
+  setActive(on: boolean): void;
   /** Called only by Viewport on unmount. */
   dispose(): void;
 }

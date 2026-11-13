@@ -12,8 +12,25 @@ import {
   type ChildLook,
 } from '../../viewer/ChildOverlay';
 import { cssToRgb } from '../../viewer/colors';
-import { buildLmTriad, buildRingMarker, buildSmGlyph, disposeObject } from '../../viewer/Glyphs';
+import {
+  buildLmTriad,
+  buildPairGlyph,
+  buildRingMarker,
+  buildSmGlyph,
+  disposeObject,
+} from '../../viewer/Glyphs';
 import { useViewer } from '../../viewer/sceneRegistry';
+
+/**
+ * The camera a glyph view follows: the main viewport (`ViewerScene`, the default) or a diff pane
+ * (`DiffScene`, spec multi-file-edit-diff Phase 7b). `objectGroup` carries the object rotation
+ * (absent in the diff view, which has no Rotate object tool).
+ */
+export interface GlyphCameraSource {
+  readonly camera: THREE.Camera;
+  readonly objectGroup?: THREE.Object3D;
+  onFrame(cb: (dt: number) => void): () => void;
+}
 
 export const GLYPH_W = 320;
 export const GLYPH_H = 176;
@@ -33,6 +50,16 @@ export type GlyphContent =
       child: { graph: ObjectGraph; look: ChildLook } | null;
       /** The node's `location_rel_model` (child frame): ringed, and the triad is drawn from it. */
       anchor?: Vec3;
+    }
+  | {
+      /**
+       * Diff node pair (spec multi-file-edit-diff Phase 7b): A's `pose_vectors` rows solid, B's
+       * dashed; either may be null (unpaired). `worst` labels the row with the largest angle.
+       */
+      kind: 'pair';
+      a: readonly number[] | null;
+      b: readonly number[] | null;
+      worst?: { row: number; text: string };
     };
 
 interface Ctx {
@@ -43,16 +70,30 @@ interface Ctx {
   d: number;
   /** `location_rel_model` ring (in glyphGroup), when shown. */
   ring: THREE.Points | null;
+  /** Anchor of the pair glyph's angle label (in glyphGroup), when shown. */
+  label: THREE.Object3D | null;
 }
 
 function buildContent(
   content: GlyphContent,
   pixelRatio: number,
-): { group: THREE.Group; ring: THREE.Points | null } {
+): { group: THREE.Group; ring: THREE.Points | null; label: THREE.Object3D | null } {
   const g = new THREE.Group();
   if (content.kind === 'sm') {
     g.add(buildSmGlyph(content.row9, content.fullyDefined, 1));
-    return { group: g, ring: null };
+    return { group: g, ring: null, label: null };
+  }
+  if (content.kind === 'pair') {
+    const { group, tips } = buildPairGlyph(content.a, content.b);
+    g.add(group);
+    let label: THREE.Object3D | null = null;
+    const tip = content.worst ? tips[content.worst.row] : null;
+    if (tip) {
+      label = new THREE.Object3D();
+      label.position.copy(tip);
+      g.add(label);
+    }
+    return { group: g, ring: null, label };
   }
   const triad = buildLmTriad(content.row9, 1);
   g.add(triad);
@@ -79,7 +120,7 @@ function buildContent(
       }
     }
   }
-  return { group: g, ring };
+  return { group: g, ring, label: null };
 }
 
 /** Fit the glyph camera distance / clip planes to the content (spec "Glyph sync"). */
@@ -115,6 +156,7 @@ export function GlyphView({
   anchorLabel,
   pulse = false,
   footer,
+  source,
 }: {
   content: GlyphContent | null;
   caption: ReactNode;
@@ -124,12 +166,16 @@ export function GlyphView({
   pulse?: boolean;
   /** Strip along the bottom of the preview (child legend). */
   footer?: ReactNode;
+  /** Camera to follow; the main viewport when undefined. */
+  source?: GlyphCameraSource | null;
 }) {
-  const viewer = useViewer();
+  const mainViewer = useViewer();
+  const viewer: GlyphCameraSource | null = source === undefined ? mainViewer : source;
   const resolvedTheme = useViewerStore((s) => s.resolvedTheme);
   const hostRef = useRef<HTMLDivElement>(null);
   const ctxRef = useRef<Ctx | null>(null);
   const tagRef = useRef<HTMLDivElement>(null);
+  const labelRef = useRef<HTMLDivElement>(null);
   const pulseRef = useRef(pulse);
   useEffect(() => {
     pulseRef.current = pulse;
@@ -156,7 +202,7 @@ export function GlyphView({
     const camera = new THREE.PerspectiveCamera(FOV, GLYPH_W / GLYPH_H, 0.01, 100);
     const glyphGroup = new THREE.Group();
     scene.add(glyphGroup);
-    ctxRef.current = { renderer, scene, camera, glyphGroup, d: 5, ring: null };
+    ctxRef.current = { renderer, scene, camera, glyphGroup, d: 5, ring: null, label: null };
     return () => {
       for (const child of [...glyphGroup.children]) disposeObject(child);
       renderer.dispose();
@@ -182,6 +228,7 @@ export function GlyphView({
         const b = buildContent(content, c.renderer.getPixelRatio());
         built = b.group;
         c.ring = b.ring;
+        c.label = b.label;
         c.glyphGroup.add(built);
       }
       fitCamera(c);
@@ -189,7 +236,10 @@ export function GlyphView({
     return () => {
       cancelAnimationFrame(id);
       if (built) disposeObject(built);
-      if (ctxRef.current) ctxRef.current.ring = null;
+      if (ctxRef.current) {
+        ctxRef.current.ring = null;
+        ctxRef.current.label = null;
+      }
     };
   }, [viewer, content, resolvedTheme]);
 
@@ -202,9 +252,11 @@ export function GlyphView({
       const q = viewer.camera.quaternion; // active persp or ortho camera
       c.camera.quaternion.copy(q);
       c.camera.position.set(0, 0, c.d).applyQuaternion(q);
-      c.glyphGroup.quaternion.copy(viewer.objectGroup.quaternion);
+      if (viewer.objectGroup) c.glyphGroup.quaternion.copy(viewer.objectGroup.quaternion);
+      else c.glyphGroup.quaternion.identity();
       c.renderer.render(c.scene, c.camera);
       placeAnchorTag(c, tagRef.current, pulseRef.current);
+      placeLabel(c, labelRef.current);
     });
   }, [viewer]);
 
@@ -240,6 +292,14 @@ export function GlyphView({
           <span className="font-sans opacity-75">is here</span>
         </div>
       )}
+      {content?.kind === 'pair' && content.worst && (
+        <div
+          ref={labelRef}
+          className="pointer-events-none absolute top-0 left-0 z-10 hidden font-mono text-[11px] font-semibold whitespace-nowrap text-diff-changed"
+        >
+          {content.worst.text}
+        </div>
+      )}
       {footer && (
         <div className="absolute inset-x-0 bottom-0 z-10 border-t border-border bg-panel/90 px-3 py-1">
           {footer}
@@ -247,6 +307,28 @@ export function GlyphView({
       )}
     </div>
   );
+}
+
+/** Pin the pair glyph's angle label just beyond its arrow tip (hidden when off-screen). */
+function placeLabel(c: Ctx, el: HTMLDivElement | null) {
+  if (!el) return;
+  const at = c.label;
+  if (!at) {
+    el.style.display = 'none';
+    return;
+  }
+  const p = at.getWorldPosition(new THREE.Vector3()).project(c.camera);
+  if (Math.abs(p.x) > 1 || Math.abs(p.y) > 1 || p.z > 1) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  const x = ((p.x + 1) / 2) * GLYPH_W;
+  const y = ((1 - p.y) / 2) * GLYPH_H;
+  const w = el.offsetWidth;
+  const left = Math.min(GLYPH_W - w - 4, Math.max(4, x + 6));
+  const top = Math.max(4, Math.min(GLYPH_H - 18, y - 16));
+  el.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
 }
 
 /**

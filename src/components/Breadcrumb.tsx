@@ -135,6 +135,10 @@ export function Breadcrumb() {
   const lmId = useViewerStore((s) => s.lmId);
   const graphId = useViewerStore((s) => s.graphId);
   const selectGraph = useViewerStore((s) => s.selectGraph);
+  // First crumb: the active file's display name ("model.pt (2)" for a repeated name).
+  const fileName = useViewerStore(
+    (s) => s.files.find((f) => f.id === s.activeFileId)?.name ?? s.model?.fileName,
+  );
   if (!model) return <nav aria-label="Breadcrumb" className="min-w-0 flex-1" />;
   const graph = getGraph(model, lmId, graphId);
   const nodes = graph?.channels.reduce((sum, c) => sum + c.n, 0);
@@ -164,7 +168,7 @@ export function Breadcrumb() {
       className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[13px] text-text"
     >
       <DisplayName
-        value={model.fileName}
+        value={fileName ?? model.fileName}
         max={BREADCRUMB_MAX}
         className="shrink max-[700px]:hidden"
       />

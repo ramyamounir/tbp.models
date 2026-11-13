@@ -1,15 +1,17 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { openModelFile } from '../../loader/loadController';
-import { useViewerStore } from '../../state/store';
+import { isGraphDrag } from '../../state/graphDrag';
+import { POINT_SIZE_MAX, POINT_SIZE_MIN, useViewerStore } from '../../state/store';
 import { PanelTabs, TabPanel } from '../PanelTabs';
 import { ColorModePanel } from './ColorModePanel';
-import { DisplayAsPanel } from './DisplayAsPanel';
+import { DisplayAsPanel, Slider } from './DisplayAsPanel';
 import { DisplayOptions } from './DisplayOptions';
 import { DropZone } from './DropZone';
 import { GraphList } from './GraphList';
-import { LmSelector } from './LmSelector';
+import { listScope, multiKeysFor, resolveRowKeys, useEditUi } from '../../state/editUi';
+import { LmActionsButton, LmSelector } from './LmSelector';
 import { LoadError } from './LoadError';
-import { ModelSummary } from './ModelSummary';
+import { OpenFilesList } from './OpenFilesList';
 
 /** Section heading + body; shared by the sidebar sections added in Phases 2, 3 and 5. */
 export function SidebarSection({
@@ -69,23 +71,53 @@ function StyleSection() {
   );
 }
 
+/**
+ * Shown in place of `StyleSection` while the diff view is open: the diff panes colour nodes by
+ * diff class and always draw points, so of the COLOR / DISPLAY options only the point size
+ * applies there.
+ */
+function DiffStyleSection() {
+  const pointSize = useViewerStore((s) => s.display.pointSize);
+  const setDisplay = useViewerStore((s) => s.setDisplay);
+  return (
+    <SidebarSection title="Display">
+      <Slider
+        label="Point size"
+        value={pointSize}
+        unit="px"
+        min={POINT_SIZE_MIN}
+        max={POINT_SIZE_MAX}
+        ariaLabel="Point size (pixels)"
+        title="Dot diameter in CSS pixels"
+        onChange={(v) => setDisplay({ pointSize: v })}
+      />
+      <p className="mt-2 text-[11px] text-faint">
+        Colors show the diff classes. Close the diff view for color and display options.
+      </p>
+    </SidebarSection>
+  );
+}
+
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
 
 /**
  * Document-level `dragover` / `drop`: a file dropped anywhere never navigates the tab away and
- * loads (first file only; no extension/MIME filter — the zip signature check decides).
+ * opens every dropped file through the load queue (no extension/MIME filter — the zip signature
+ * check decides). Graph-row drags are ignored entirely, so the `dropEffect` set by an LM button,
+ * file row or diff slot in its own `dragover` is never overwritten here.
  */
 function useDocumentFileDrop() {
   useEffect(() => {
     const onDragOver = (e: DragEvent) => {
+      if (isGraphDrag(e)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = hasFiles(e) ? 'copy' : 'none';
     };
     const onDrop = (e: DragEvent) => {
+      if (isGraphDrag(e)) return;
       const t0 = performance.now();
       e.preventDefault();
-      const file = e.dataTransfer?.files?.[0];
-      if (file) openModelFile(file, t0);
+      for (const file of Array.from(e.dataTransfer?.files ?? [])) openModelFile(file, t0);
     };
     document.addEventListener('dragover', onDragOver);
     document.addEventListener('drop', onDrop);
@@ -97,17 +129,35 @@ function useDocumentFileDrop() {
 }
 
 /**
- * Left sidebar (272 px): model (drop zone, progress, errors, summary), LM selector and graph
- * list (Phase 2); color mode and display options as COLOR / DISPLAY tabs (Phase 3). Collapsing (Phase 5) only hides it, so the
- * document-level drop handler and component state stay alive.
+ * Left sidebar (272 px): open files (or the drop zone when none is open), LM selector and graph
+ * list; color mode and display options as COLOR / DISPLAY tabs. Collapsing only hides it, so the
+ * document-level drop handler and component state stay alive. `onOpenModel` opens the shared
+ * file picker of App (the "+ Open another model.pt" row).
  */
-export function Sidebar({ open = true }: { open?: boolean }) {
+export function Sidebar({
+  open = true,
+  onOpenModel,
+}: {
+  open?: boolean;
+  onOpenModel?: () => void;
+}) {
   useDocumentFileDrop();
   const hasModel = useViewerStore((s) => s.model !== undefined);
+  const fileCount = useViewerStore((s) => s.files.length);
   const loadGen = useViewerStore((s) => s.loadGen);
   const lmId = useViewerStore((s) => s.lmId);
   const lm = useViewerStore((s) => s.model?.lms[s.lmId]);
+  const activeFileId = useViewerStore((s) => s.activeFileId);
+  const diffOpen = useViewerStore((s) => s.diff.open);
   const graphCount = lm ? lm.graphIds.length + lm.unreadable.length : undefined;
+  // "k / n" while the graph list has a multi-selection (rows that still exist only).
+  const checked = useEditUi((s) => {
+    if (!lm) return 0;
+    const keys = multiKeysFor(s.multi, listScope(activeFileId, lmId));
+    if (keys.length === 0) return 0;
+    const r = resolveRowKeys(lm, keys);
+    return r.graphIds.length + r.unreadable.length;
+  });
   return (
     <aside
       id="app-sidebar"
@@ -115,15 +165,9 @@ export function Sidebar({ open = true }: { open?: boolean }) {
       hidden={!open}
       className={`w-[272px] shrink-0 flex-col overflow-y-auto border-r border-border bg-panel ${open ? 'flex' : 'hidden'}`}
     >
-      <SidebarSection title="Model">
-        {hasModel ? (
-          <>
-            <DropZone compact />
-            <LoadError />
-            <div className="mt-3">
-              <ModelSummary />
-            </div>
-          </>
+      <SidebarSection title={fileCount > 0 ? `Open files · ${fileCount}` : 'Open files'}>
+        {fileCount > 0 ? (
+          <OpenFilesList onOpenModel={onOpenModel} />
         ) : (
           <>
             <DropZone />
@@ -131,18 +175,25 @@ export function Sidebar({ open = true }: { open?: boolean }) {
           </>
         )}
       </SidebarSection>
-      <SidebarSection title="Learning module">
+      <SidebarSection title="Learning module" aside={<LmActionsButton />}>
         <LmSelector />
       </SidebarSection>
       <SidebarSection
         title={hasModel ? `Graphs in LM ${lmId}` : 'Graphs'}
         aside={
-          graphCount !== undefined && <span className="text-[11px] text-faint">{graphCount}</span>
+          graphCount !== undefined &&
+          (checked > 0 ? (
+            <span className="text-[11px] font-semibold text-accent">
+              {checked} / {graphCount}
+            </span>
+          ) : (
+            <span className="text-[11px] text-faint">{graphCount}</span>
+          ))
         }
       >
-        <GraphList key={`${loadGen}-${lmId}`} />
+        <GraphList key={`${activeFileId ?? ''}-${loadGen}-${lmId}`} />
       </SidebarSection>
-      <StyleSection />
+      {diffOpen ? <DiffStyleSection /> : <StyleSection />}
     </aside>
   );
 }

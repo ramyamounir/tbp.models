@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { testOrder, testOrigin } from '../loader/testFixture';
 import type { ChannelGraph, ModelFile, ObjectGraph } from '../model/types';
 import { stepNode } from './keyboard';
 import { DEFAULT_CHILD_DISPLAY, DEFAULT_DISPLAY, useViewerStore, validateColorMode } from './store';
@@ -21,7 +22,7 @@ function channel(
 }
 
 function graph(lmId: number, graphId: string, channels: ChannelGraph[]): ObjectGraph {
-  return { lmId, graphId, channels, centroid: [0, 0, 0] };
+  return { lmId, graphId, channels, centroid: [0, 0, 0], origin: testOrigin(lmId), patches: [] };
 }
 
 const smOnly = graph(0, 'mug', [
@@ -59,18 +60,21 @@ const model: ModelFile = {
       graphIds: ['mug'],
       graphs: new Map([['mug', smOnly]]),
       unreadable: [],
+      order: testOrder(['mug']),
     },
     {
       lmId: 1,
       graphIds: ['cube'],
       graphs: new Map([['cube', twoCh]]),
       unreadable: [],
+      order: testOrder(['cube']),
     },
     {
       lmId: 2,
       graphIds: ['logo'],
       graphs: new Map([['logo', edge2d]]),
       unreadable: [],
+      order: testOrder(['logo']),
     },
   ],
   lmToLm: [],
@@ -79,6 +83,12 @@ const model: ModelFile = {
 };
 
 const initial = useViewerStore.getState();
+
+/** Opens `model` as a new file and selects `graphId` of LM `lmId`. */
+function openModel(lmId: number, graphId: string): void {
+  useViewerStore.getState().openFile(new File([], 'model.pt'), model);
+  useViewerStore.getState().selectGraph(lmId, graphId);
+}
 beforeEach(() => useViewerStore.setState(initial, true));
 
 describe('store defaults', () => {
@@ -107,11 +117,11 @@ describe('store defaults', () => {
   });
 });
 
-describe('setModel / selectGraph', () => {
-  it('setModel stores atomically, bumps loadGen and clears loading/error/selection', () => {
+describe('openFile / selectGraph', () => {
+  it('openFile stores atomically, bumps loadGen and clears loading/error/selection', () => {
     const s = useViewerStore.getState();
     s.setLoading({ stage: 'parsing' });
-    s.setModel(model, 1, 'cube');
+    openModel(1, 'cube');
     let st = useViewerStore.getState();
     expect(st.loadGen).toBe(1);
     expect(st.lmId).toBe(1);
@@ -119,7 +129,7 @@ describe('setModel / selectGraph', () => {
     expect(st.loading).toBeUndefined();
     st.setSelection({ channel: 'patch_1', index: 0 });
     st.setOverlayChild(true);
-    st.setModel(model, 0, 'mug');
+    openModel(0, 'mug');
     st = useViewerStore.getState();
     expect(st.loadGen).toBe(2);
     expect(st.selection).toBeUndefined();
@@ -131,7 +141,7 @@ describe('setModel / selectGraph', () => {
     const s = useViewerStore.getState();
     s.selectGraph(1, 'cube'); // no model
     expect(useViewerStore.getState().graphId).toBeUndefined();
-    s.setModel(model, 0, 'mug');
+    openModel(0, 'mug');
     s.selectGraph(5, undefined);
     s.selectGraph(0, 'cube');
     expect(useViewerStore.getState()).toMatchObject({
@@ -147,7 +157,7 @@ describe('setModel / selectGraph', () => {
 
   it('validates colorMode against the new graph', () => {
     const s = useViewerStore.getState();
-    s.setModel(model, 1, 'cube');
+    openModel(1, 'cube');
     s.setColorMode({ kind: 'lm', feature: 'object_id' });
     s.selectGraph(0, 'mug');
     expect(useViewerStore.getState().colorMode).toEqual({ kind: 'all' });
@@ -214,7 +224,7 @@ describe('selection, tabs, display, theme', () => {
 
   it('stepping to the next node keeps the child overlay on; picking a node turns it off', () => {
     const s = useViewerStore.getState();
-    s.setModel(model, 1, 'cube');
+    openModel(1, 'cube');
     s.setSelection({ channel: 'learning_module_0', index: 0 });
     s.setOverlayChild(true);
     expect(stepNode(useViewerStore.getState(), 1)).toBe(true);
@@ -253,7 +263,7 @@ describe('selection, tabs, display, theme', () => {
     const s = useViewerStore.getState();
     s.setDisplay({ displayAs: 'edges' }); // no model → no edge channel
     expect(useViewerStore.getState().display.displayAs).toBe('points');
-    s.setModel(model, 2, 'logo');
+    openModel(2, 'logo');
     s.setDisplay({ displayAs: 'edges' });
     expect(useViewerStore.getState().display.displayAs).toBe('edges');
     s.setDisplay({ displayAs: 'bogus' as never });
@@ -278,9 +288,9 @@ describe('selection, tabs, display, theme', () => {
 });
 
 describe('legend prefs', () => {
-  it('reorders, toggles hidden and shows all; kept across graphs, reset by setModel', () => {
+  it('reorders, toggles hidden and shows all; kept across graphs, reset by openFile', () => {
     const s = useViewerStore.getState();
-    s.setModel(model, 1, 'cube');
+    openModel(1, 'cube');
     s.setLegendOrder('channel', ['b', 'a']);
     s.setLegendOrder('channel', ['c', 'a']); // keys not given keep their place after
     expect(useViewerStore.getState().legend.channel.order).toEqual(['c', 'a', 'b']);
@@ -293,13 +303,13 @@ describe('legend prefs', () => {
     expect(useViewerStore.getState().legend.categorical.hidden).toEqual(['y']);
     s.showAllLegendRows('categorical');
     expect(useViewerStore.getState().legend.categorical.hidden).toEqual([]);
-    s.setModel(model, 1, 'cube');
+    openModel(1, 'cube');
     expect(useViewerStore.getState().legend.channel.order).toEqual([]);
   });
 });
 
 describe('match radius', () => {
-  it('defaults to 2 % of R, clamps to 0..10 and survives setModel', () => {
+  it('defaults to 2 % of R, clamps to 0..10 and survives openFile', () => {
     const s = useViewerStore.getState();
     expect(s.matchRadiusPct).toBe(2);
     s.setMatchRadiusPct(50);
@@ -309,18 +319,18 @@ describe('match radius', () => {
     s.setMatchRadiusPct(NaN);
     expect(useViewerStore.getState().matchRadiusPct).toBe(0);
     s.setMatchRadiusPct(3.5);
-    s.setModel(model, 1, 'cube');
+    openModel(1, 'cube');
     expect(useViewerStore.getState().matchRadiusPct).toBe(3.5);
   });
 });
 
 describe('child settings and inspector tab', () => {
-  it('default to All / points / FEATURES; kept across graphs, reset by setModel', () => {
+  it('default to All / points / FEATURES; kept across graphs, reset by openFile', () => {
     const s = useViewerStore.getState();
     expect(s.childColorMode).toEqual({ kind: 'all' });
     expect(s.childDisplay).toEqual(DEFAULT_CHILD_DISPLAY);
     expect(s.inspectorTab).toBe('features');
-    s.setModel(model, 1, 'cube');
+    openModel(1, 'cube');
     s.setChildColorMode({ kind: 'sm', feature: 'hsv' });
     s.setChildDisplay({ displayAs: 'edges', edgeWidthPx: 99, pointSize: 0 });
     s.setInspectorTab('color');
@@ -330,7 +340,7 @@ describe('child settings and inspector tab', () => {
     expect(st.childColorMode).toEqual({ kind: 'sm', feature: 'hsv' });
     expect(st.childDisplay).toMatchObject({ displayAs: 'edges', edgeWidthPx: 16, pointSize: 1 });
     expect(st.inspectorTab).toBe('color');
-    s.setModel(model, 1, 'cube');
+    openModel(1, 'cube');
     st = useViewerStore.getState();
     expect(st.childColorMode).toEqual({ kind: 'all' });
     expect(st.childDisplay).toEqual(DEFAULT_CHILD_DISPLAY);

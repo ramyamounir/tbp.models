@@ -15,7 +15,6 @@
  * No module-level singletons: other components reach the scene only via `sceneRegistry`.
  */
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { ChannelGraph, ObjectGraph } from '../model/types';
 import { getGraph, useViewerStore, type Tool, type ViewerState } from '../state/store';
 import { readToken } from '../theme/readToken';
@@ -34,10 +33,8 @@ import { Picker, type PickHit } from './Picker';
 import { isEdgeChannel } from '../model/edges';
 import { graphRadius, PointCloudLayer } from './PointCloudLayer';
 import type { ViewerScene } from './sceneRegistry';
+import { createCameraRig } from './cameraRig';
 
-const FOV = 40;
-const DEFAULT_DIR = new THREE.Vector3(0.55, 0.42, 1).normalize();
-const FIT_MARGIN = 1.15;
 const SELECT_RING_PX = 24;
 const HOVER_RING_PX = 18;
 const ROTATE_RAD_PER_PX = 0.008;
@@ -72,19 +69,13 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
   canvas.setAttribute('aria-label', 'Object graph point cloud');
   container.appendChild(canvas);
 
-  const perspCam = new THREE.PerspectiveCamera(FOV, 1, 0.001, 100);
-  const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 100);
-  let orthoHalfH = 1;
-  let camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = perspCam;
-  perspCam.position.copy(DEFAULT_DIR);
-
-  const controls = new OrbitControls<THREE.PerspectiveCamera | THREE.OrthographicCamera>(
-    perspCam,
+  // Cameras and OrbitControls (shared with the diff panes, src/viewer/cameraRig.ts).
+  const rig = createCameraRig({
     canvas,
-  );
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.15;
-  controls.zoomToCursor = false;
+    size: () => size(),
+    bounds: () => ({ center: worldCenter(), radius: R }),
+  });
+  const controls = rig.controls;
 
   const scene = new THREE.Scene();
   const objectGroup = new THREE.Group();
@@ -295,95 +286,15 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     return { w: Math.max(1, container.clientWidth), h: Math.max(1, container.clientHeight) };
   }
 
-  function updateOrthoFrustum() {
-    const { w, h } = size();
-    const aspect = w / h;
-    orthoCam.left = -orthoHalfH * aspect;
-    orthoCam.right = orthoHalfH * aspect;
-    orthoCam.top = orthoHalfH;
-    orthoCam.bottom = -orthoHalfH;
-    orthoCam.updateProjectionMatrix();
-  }
-
   function worldCenter(): THREE.Vector3 {
     objectGroup.updateMatrixWorld(true);
     const c = graph?.centroid ?? [0, 0, 0];
     return modelFrameGroup.localToWorld(new THREE.Vector3(c[0], c[1], c[2]));
   }
 
-  function setClipping(dist: number) {
-    perspCam.near = Math.max(R * 1e-3, 1e-6);
-    perspCam.far = dist * 20 + R * 50;
-    perspCam.updateProjectionMatrix();
-    orthoCam.near = -(dist * 20 + R * 50);
-    orthoCam.far = dist * 20 + R * 50;
-    controls.minDistance = R * 0.05;
-    controls.maxDistance = dist * 15;
-    controls.minZoom = 0.05;
-    controls.maxZoom = 50;
-  }
-
-  function frame(dir: THREE.Vector3) {
-    const { w, h } = size();
-    const aspect = w / h;
-    const vfov = THREE.MathUtils.degToRad(FOV);
-    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
-    const dist = (FIT_MARGIN * R) / Math.sin(Math.min(vfov, hfov) / 2);
-    const center = worldCenter();
-    const pos = center.clone().addScaledVector(dir, dist);
-    perspCam.position.copy(pos);
-    perspCam.zoom = 1;
-    orthoCam.position.copy(pos);
-    orthoCam.zoom = 1;
-    orthoHalfH = (FIT_MARGIN * R) / Math.min(1, aspect);
-    updateOrthoFrustum();
-    setClipping(dist);
-    controls.target.copy(center);
-    perspCam.lookAt(center);
-    orthoCam.up.copy(perspCam.up);
-    orthoCam.lookAt(center);
-    controls.update();
-  }
-
-  function fit() {
-    const dir = camera.position.clone().sub(controls.target);
-    if (dir.lengthSq() < 1e-18 || !Number.isFinite(dir.x)) dir.copy(DEFAULT_DIR);
-    frame(dir.normalize());
-  }
-
-  function resetView() {
-    perspCam.up.set(0, 1, 0);
-    orthoCam.up.set(0, 1, 0);
-    frame(DEFAULT_DIR.clone());
-  }
-
-  function applyOrtho() {
-    const want = st().ortho;
-    const target = controls.target;
-    const tanHalf = Math.tan(THREE.MathUtils.degToRad(FOV) / 2);
-    if (want && camera === perspCam) {
-      const dist = perspCam.position.distanceTo(target);
-      orthoHalfH = Math.max(dist * tanHalf, 1e-6);
-      orthoCam.position.copy(perspCam.position);
-      orthoCam.quaternion.copy(perspCam.quaternion);
-      orthoCam.up.copy(perspCam.up);
-      orthoCam.zoom = 1;
-      updateOrthoFrustum();
-      camera = orthoCam;
-    } else if (!want && camera === orthoCam) {
-      const dist = orthoHalfH / orthoCam.zoom / tanHalf;
-      const dir = orthoCam.position.clone().sub(target).normalize();
-      perspCam.position.copy(target).addScaledVector(dir, dist);
-      perspCam.up.copy(orthoCam.up);
-      perspCam.zoom = 1;
-      perspCam.updateProjectionMatrix();
-      camera = perspCam;
-    } else {
-      return;
-    }
-    controls.object = camera;
-    controls.update();
-  }
+  const fit = () => rig.fit();
+  const resetView = () => rig.resetView();
+  const applyOrtho = () => rig.setOrtho(st().ortho);
 
   const TOOL_CURSOR: Record<Tool, string> = {
     orbit: 'default',
@@ -444,11 +355,11 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
   // ---- picking ---------------------------------------------------------------------------
   const picker = new Picker({
     dom: canvas,
-    getCamera: () => camera,
+    getCamera: () => rig.camera,
     getLayers: () => layers,
     getPointSizePx: () => st().display.pointSize,
     getTool: () => st().tool,
-    getTargetDistance: () => camera.position.distanceTo(controls.target),
+    getTargetDistance: () => rig.camera.position.distanceTo(controls.target),
     onHover: (hit) => {
       hover = hit;
       rebuildHover();
@@ -471,8 +382,8 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     rotDrag.x = e.clientX;
     rotDrag.y = e.clientY;
     if (dx === 0 && dy === 0) return;
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(rig.camera.quaternion);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(rig.camera.quaternion);
     const q = new THREE.Quaternion()
       .setFromAxisAngle(up, dx * ROTATE_RAD_PER_PX)
       .multiply(new THREE.Quaternion().setFromAxisAngle(right, dy * ROTATE_RAD_PER_PX))
@@ -510,7 +421,11 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
       rebuildGraph();
     } else {
       const selChanged = s.selection !== p.selection;
+      // An edit can change how this graph's object_id values resolve without replacing the
+      // graph object (rename / delete / copy of a child, and their undo / redo); every edit sets
+      // a new objectIdIndex. The child overlay is drawn by LmPanel, which re-resolves on `model`.
       if (
+        s.model?.objectIdIndex !== p.model?.objectIdIndex ||
         s.colorMode !== p.colorMode ||
         s.legend !== p.legend ||
         s.display.dimOthers !== p.display.dimOthers ||
@@ -547,13 +462,20 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
   }
   const unsubscribe = useViewerStore.subscribe(onStore);
 
+  /**
+   * false while the diff view hides this viewport: no frames are requested. Declared before
+   * `resize()` runs for the first time (it reads the flag).
+   */
+  let active = true;
+
   // ---- resize ----------------------------------------------------------------------------
   function resize() {
+    // While paused the container is `display: none` and reports 0 × 0; keep the last size and
+    // re-read it in setActive(true).
+    if (!active && (container.clientWidth === 0 || container.clientHeight === 0)) return;
     const { w, h } = size();
     renderer.setSize(w, h, false);
-    perspCam.aspect = w / h;
-    perspCam.updateProjectionMatrix();
-    updateOrthoFrustum();
+    rig.resize();
     applyPointSize();
   }
   const ro = new ResizeObserver(resize);
@@ -562,7 +484,8 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
 
   // ---- render loop -----------------------------------------------------------------------
   const callbacks: ((dt: number) => void)[] = [];
-  let raf = 0;
+  /** Pending animation frame of the loop, or null (paused or disposed). */
+  let raf: number | null = null;
   let last = performance.now();
   let disposed = false;
   const tmp = new THREE.Vector3();
@@ -578,7 +501,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     }
     tmp.copy(p);
     modelFrameGroup.localToWorld(tmp);
-    tmp.project(camera);
+    tmp.project(rig.camera);
     if (tmp.z < -1 || tmp.z > 1) {
       label.classList.add('hidden');
       return;
@@ -595,11 +518,12 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
   }
 
   function render() {
-    renderer.render(scene, camera);
+    renderer.render(scene, rig.camera);
   }
 
   function loop() {
-    if (disposed) return;
+    raf = null;
+    if (disposed || !active) return;
     raf = requestAnimationFrame(loop);
     const now = performance.now();
     const dt = (now - last) / 1000;
@@ -627,7 +551,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
   return {
     renderer,
     get camera() {
-      return camera;
+      return rig.camera;
     },
     objectGroup,
     modelFrameGroup,
@@ -655,10 +579,25 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     },
     fit,
     resetView,
+    setActive(on) {
+      if (disposed || on === active) return;
+      active = on;
+      if (!on) {
+        if (raf !== null) cancelAnimationFrame(raf);
+        raf = null;
+        return;
+      }
+      resize();
+      controls.update();
+      render();
+      last = performance.now();
+      if (raf === null) raf = requestAnimationFrame(loop);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
-      cancelAnimationFrame(raf);
+      if (raf !== null) cancelAnimationFrame(raf);
+      raf = null;
       cancelAnimationFrame(themeFrame);
       callbacks.length = 0;
       unsubscribe();
@@ -671,7 +610,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
       canvas.removeEventListener('pointerdown', onMiddleDown);
       canvas.removeEventListener('pointerup', onMiddleUp);
       canvas.removeEventListener('pointercancel', onMiddleUp);
-      controls.dispose();
+      rig.dispose();
       for (const l of layers) l.dispose();
       layers = [];
       for (const e of edges) e.dispose();

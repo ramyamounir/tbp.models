@@ -8,6 +8,7 @@ import {
   DIMMED_KEY,
   type ThemeColors,
 } from './colors';
+import { testOrigin } from '../loader/testFixture';
 
 const theme: ThemeColors = {
   pointDefault: [0.5, 0.5, 0.5],
@@ -34,6 +35,8 @@ function channel(name: string, kind: 'sm' | 'lm', feature: string, values: numbe
 const graph: ObjectGraph = {
   lmId: 2,
   graphId: 'cube',
+  origin: testOrigin(2),
+  patches: [],
   channels: [
     channel('patch_0', 'sm', 'on_object', [1, 1]),
     channel('learning_module_1', 'lm', 'object_id', [7, 8]),

@@ -18,13 +18,22 @@ const U16_MAX = 0xffff;
 export interface ZipEntry {
   localOffset: number;
   size: number;
+  /** CRC-32 from the central directory (offset 16); reused when the exporter copies the entry. */
+  crc32: number;
 }
 
 export interface Zip {
   entries: Map<string, ZipEntry>;
-  /** Directory holding the single `data.pkl` (`model` or `archive` for torch files). */
+  /** Entry names in central directory order. */
+  order: string[];
+  /** Directory holding the single `data.pkl` (`model` or `archive` for torch files), no trailing `/`. */
   prefix: string;
   read(name: string): Promise<Uint8Array>;
+  /**
+   * Byte range of an entry's data in the file, from its local header. Always
+   * `0 <= start <= end <= file.size` (throws `ParseError` otherwise).
+   */
+  dataRange(name: string): Promise<{ start: number; end: number }>;
 }
 
 const nameDecoder = new TextDecoder('utf-8', { fatal: true });
@@ -110,12 +119,14 @@ export async function openZip(file: Blob): Promise<Zip> {
   const cd = await sliceBytes(file, cdOffset, cdOffset + cdSize);
   const dv = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
   const entries = new Map<string, ZipEntry>();
+  const order: string[] = [];
   let p = 0;
   for (let n = 0; n < count; n++) {
     if (p + 46 > cd.length) throw new ParseError('Truncated zip central directory');
     if (dv.getUint32(p, true) !== SIG_CENTRAL)
       throw new ParseError('Bad zip central directory signature');
     const method = dv.getUint16(p + 10, true);
+    const crc = dv.getUint32(p + 16, true);
     let compSize = dv.getUint32(p + 20, true);
     let rawSize = dv.getUint32(p + 24, true);
     const nameLen = dv.getUint16(p + 28, true);
@@ -161,7 +172,8 @@ export async function openZip(file: Blob): Promise<Zip> {
     inFile(rawSize, size, 'entry size');
     if (localOffset + 30 + rawSize > size) throw new ParseError(`Zip entry ${name} out of range`);
     if (entries.has(name)) throw new ParseError(`Duplicate zip entry ${name}`);
-    entries.set(name, { localOffset, size: rawSize });
+    entries.set(name, { localOffset, size: rawSize, crc32: crc });
+    order.push(name);
     p = recEnd;
   }
   if (p !== cd.length) throw new ParseError('Zip entry count does not match the central directory');
@@ -171,7 +183,7 @@ export async function openZip(file: Blob): Promise<Zip> {
   if (pkls.length > 1) throw new ParseError('Multiple data.pkl entries in the zip');
   const prefix = pkls[0].slice(0, -'/data.pkl'.length);
 
-  async function read(entryName: string): Promise<Uint8Array> {
+  async function dataRange(entryName: string): Promise<{ start: number; end: number }> {
     const ent = entries.get(entryName);
     if (!ent) throw new ParseError(`Missing zip entry ${entryName}`);
     const hdr = await sliceBytes(file, ent.localOffset, ent.localOffset + 30);
@@ -181,11 +193,20 @@ export async function openZip(file: Blob): Promise<Zip> {
     }
     const start = ent.localOffset + 30 + hdv.getUint16(26, true) + hdv.getUint16(28, true);
     const end = start + ent.size;
-    if (end > size) throw new ParseError(`Zip entry ${entryName} out of range`);
+    if (!Number.isSafeInteger(end) || start < 0 || start > end || end > size) {
+      throw new ParseError(`Zip entry ${entryName} out of range`);
+    }
+    return { start, end };
+  }
+
+  async function read(entryName: string): Promise<Uint8Array> {
+    const ent = entries.get(entryName);
+    if (!ent) throw new ParseError(`Missing zip entry ${entryName}`);
+    const { start, end } = await dataRange(entryName);
     const data = await sliceBytes(file, start, end);
     if (data.length !== ent.size) throw new ParseError(`Truncated zip entry ${entryName}`);
     return data;
   }
 
-  return { entries, prefix, read };
+  return { entries, order, prefix, read, dataRange };
 }

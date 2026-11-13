@@ -1,9 +1,21 @@
 /**
  * The single global keyboard handler (spec Phase 3 "Keyboard"). Phase 4 extends this same switch
- * (`[` / `]`, `←` / `→`); no other `keydown` listener exists anywhere.
+ * (`[` / `]`, `←` / `→`); multi-file-edit-diff Phase 3a adds the edit shortcuts (`F2`, `Delete`,
+ * `Ctrl D`, undo / redo). No other global `keydown` listener exists anywhere.
  */
 import { getGraph, useViewerStore, type ViewerState } from './store';
 import { getViewer } from '../viewer/sceneRegistry';
+import { getDiffScenes } from '../viewer/diffSceneRegistry';
+import { currentDiffResult } from '../diff/useDiff';
+import { differenceList, stepDifference } from '../diff/viewClasses';
+import {
+  duplicateGraphsAction,
+  keyboardTargets,
+  redoAction,
+  requestDeleteGraphs,
+  startRename,
+  undoAction,
+} from './editUi';
 import {
   activeNode,
   findChannel,
@@ -16,11 +28,62 @@ function isTypingTarget(t: EventTarget | null): boolean {
   return t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName);
 }
 
+/**
+ * Edit shortcuts (spec multi-file-edit-diff Phase 3a "Keyboard"), the only modifier combinations
+ * this handler accepts: `Ctrl`/`Cmd`+`D` duplicate, `Ctrl`/`Cmd`+`Z` undo, `Ctrl`/`Cmd`+`Shift`+`Z`
+ * and `Ctrl`+`Y` redo. Returns false for any other combination.
+ */
+function onModifiedKey(e: KeyboardEvent): boolean {
+  const key = e.key.toLowerCase();
+  if (key === 'd' && !e.shiftKey) {
+    const s = useViewerStore.getState();
+    if (s.activeFileId === undefined) return false;
+    const t = keyboardTargets();
+    if (t) duplicateGraphsAction(t.fileId, t.lmId, t.graphIds);
+    return true; // also keeps the browser's bookmark dialog closed
+  }
+  if (key === 'z') {
+    if (e.shiftKey) redoAction();
+    else undoAction();
+    return true;
+  }
+  if (key === 'y' && e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    redoAction();
+    return true;
+  }
+  return false;
+}
+
 export function onKeyDown(e: KeyboardEvent): void {
-  if (e.defaultPrevented || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.defaultPrevented || e.repeat || e.altKey) return;
   if (isTypingTarget(e.target)) return;
+  // A modal dialog owns the keyboard while it is open (no edit, undo or redo can run then).
+  if (typeof document !== 'undefined' && document.querySelector('[aria-modal="true"]')) return;
+  if (e.ctrlKey || e.metaKey) {
+    if (onModifiedKey(e)) e.preventDefault();
+    return;
+  }
   const s = useViewerStore.getState();
+  if (s.diff.open) {
+    // The diff view replaces the viewport and inspector: their shortcuts are inactive.
+    if (onDiffKey(s, e.key)) e.preventDefault();
+    if (e.key !== 'F2' && e.key !== 'Delete' && e.key !== 'Backspace') return;
+  }
   switch (e.key) {
+    case 'F2': {
+      const t = keyboardTargets();
+      // Rename needs exactly one readable model.
+      if (!t || t.graphIds.length !== 1 || t.unreadable.length > 0) return;
+      startRename(t.fileId, t.lmId, t.graphIds[0]);
+      break;
+    }
+    case 'Delete':
+    case 'Backspace': {
+      const t = keyboardTargets();
+      if (!t || t.graphIds.length + t.unreadable.length === 0) return;
+      requestDeleteGraphs(t.fileId, t.lmId, t.graphIds, t.unreadable);
+      break;
+    }
     case 'r':
     case 'R':
       s.setTool(s.tool === 'rotate' ? 'orbit' : 'rotate');
@@ -44,6 +107,42 @@ export function onKeyDown(e: KeyboardEvent): void {
       return;
   }
   e.preventDefault();
+}
+
+/**
+ * Diff view keys (spec multi-file-edit-diff Phase 7b "Keyboard"): `Esc` clears the node
+ * selection (an open settings dialog is modal and handles its own `Esc`), `←` / `→` step to the
+ * previous / next difference, `F` fits the diff panes. Returns true when the key was handled.
+ */
+function onDiffKey(s: ViewerState, key: string): boolean {
+  switch (key) {
+    case 'Escape':
+      if (!s.diff.selection) return false;
+      s.setDiffSelection(undefined);
+      return true;
+    case 'ArrowLeft':
+    case 'ArrowRight': {
+      const result = currentDiffResult();
+      if (!result) return false;
+      const next = stepDifference(
+        result,
+        differenceList(result),
+        s.diff.selection,
+        key === 'ArrowLeft' ? -1 : 1,
+      );
+      if (!next) return false;
+      s.setDiffSelection(next);
+      return true;
+    }
+    case 'f':
+    case 'F': {
+      const scenes = getDiffScenes();
+      scenes.forEach((sc) => sc.fit());
+      return scenes.length > 0;
+    }
+    default:
+      return false;
+  }
 }
 
 /**

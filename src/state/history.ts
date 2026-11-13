@@ -1,10 +1,12 @@
 /**
  * Browser-history sync for hierarchy navigation (spec Phase 5 "History entries").
  *
- * `history.state` only ever holds `{ lmId, graphId, loadGen }` — never node data or the model.
+ * `history.state` only ever holds `{ lmId, graphId, loadGen, fileId }` — never node data or the
+ * model.
  * "Open in LM k →" first `replaceState`s the current graph (so Back has a valid entry), then
  * `pushState`s the target and calls `selectGraph`. On `popstate` an entry is accepted only if it
- * still names a graph of the currently loaded model (`loadGen` must match), otherwise ignored.
+ * still names a graph of the currently displayed model (`loadGen` and the active `fileId` must
+ * match), otherwise ignored: entries of a non-active or closed file are never applied.
  */
 import type { ModelFile } from '../model/types';
 import { useViewerStore } from './store';
@@ -13,6 +15,7 @@ export interface HistoryEntry {
   lmId: number;
   graphId: string;
   loadGen: number;
+  fileId: string;
 }
 
 /** Validates a `history.state` value against the current model; pure, for tests. */
@@ -20,29 +23,33 @@ export function validHistoryEntry(
   state: unknown,
   model: ModelFile | undefined,
   loadGen: number,
+  activeFileId: string | undefined,
 ): HistoryEntry | undefined {
-  if (!model || typeof state !== 'object' || state === null) return undefined;
-  const { lmId, graphId, loadGen: gen } = state as Record<string, unknown>;
+  if (!model || activeFileId === undefined || typeof state !== 'object' || state === null)
+    return undefined;
+  const { lmId, graphId, loadGen: gen, fileId } = state as Record<string, unknown>;
   if (!Number.isInteger(lmId) || typeof graphId !== 'string' || gen !== loadGen) return undefined;
+  if (fileId !== activeFileId) return undefined;
   const lm = lmId as number;
   if (lm < 0 || lm >= model.lms.length) return undefined;
   if (!model.lms[lm].graphs.has(graphId)) return undefined;
-  return { lmId: lm, graphId, loadGen };
+  return { lmId: lm, graphId, loadGen, fileId };
 }
 
 /** Navigate to a child graph in another LM, recording a history entry so Back returns here. */
 export function navigateToGraph(lmId: number, graphId: string): void {
   const s = useViewerStore.getState();
-  if (!s.model || !s.model.lms[lmId]?.graphs.has(graphId)) return;
+  if (!s.model || s.activeFileId === undefined || !s.model.lms[lmId]?.graphs.has(graphId)) return;
+  const fileId = s.activeFileId;
   if (lmId === s.lmId && graphId === s.graphId) return;
   try {
     if (s.graphId !== undefined) {
       history.replaceState(
-        { lmId: s.lmId, graphId: s.graphId, loadGen: s.loadGen } satisfies HistoryEntry,
+        { lmId: s.lmId, graphId: s.graphId, loadGen: s.loadGen, fileId } satisfies HistoryEntry,
         '',
       );
     }
-    history.pushState({ lmId, graphId, loadGen: s.loadGen } satisfies HistoryEntry, '');
+    history.pushState({ lmId, graphId, loadGen: s.loadGen, fileId } satisfies HistoryEntry, '');
   } catch (err) {
     // History API unavailable (e.g. sandboxed iframe); navigation still works without Back.
     console.warn('Could not record navigation history', err);
@@ -52,7 +59,7 @@ export function navigateToGraph(lmId: number, graphId: string): void {
 
 export function onPopState(e: PopStateEvent): void {
   const s = useViewerStore.getState();
-  const entry = validHistoryEntry(e.state, s.model, s.loadGen);
+  const entry = validHistoryEntry(e.state, s.model, s.loadGen, s.activeFileId);
   if (entry) s.selectGraph(entry.lmId, entry.graphId);
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildEdgeSegments, edgeNodeCount, graphHasEdgeChannel, isEdgeChannel } from './edges';
 import type { ChannelGraph, ObjectGraph } from './types';
+import { testOrigin } from '../loader/testFixture';
 
 // Feature layout of a real 2D-sensor channel (pretrained_models/2d_sensor/learning_2d):
 // pose_vectors [0,9], pose_fully_defined [9,10], ..., edge_strength [23,24], coherence [24,25].
@@ -54,6 +55,8 @@ const graph = (channels: ChannelGraph[]): ObjectGraph => ({
   graphId: '021_logo_tbp',
   channels,
   centroid: [0, 0, 0],
+  origin: testOrigin(),
+  patches: [],
 });
 
 describe('isEdgeChannel', () => {

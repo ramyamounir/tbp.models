@@ -13,6 +13,7 @@ import {
   placeChildCloud,
 } from './ChildOverlay';
 import { CHILD_CATEGORICAL, cssToRgb, type RGB, type ThemeColors } from './colors';
+import { testOrigin } from '../loader/testFixture';
 
 // Known asymmetric rotation R: 30° about normalized (1, 2, 3). R is the child→parent rotation.
 const axis = new THREE.Vector3(1, 2, 3).normalize();
@@ -56,7 +57,7 @@ function channel(
 }
 
 function graph(channels: ChannelGraph[], centroid: Vec3 = [0, 0, 0]): ObjectGraph {
-  return { lmId: 0, graphId: 'child', channels, centroid };
+  return { lmId: 0, graphId: 'child', channels, centroid, origin: testOrigin(), patches: [] };
 }
 
 describe('childRotation (Monty storage convention)', () => {

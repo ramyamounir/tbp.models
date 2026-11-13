@@ -26,6 +26,15 @@
   --color-row-alt: var(--row-alt);
   --color-brand-blue: var(--brand-blue);
   --color-brand-navy: var(--brand-navy);
+  --color-diff-equal: var(--diff-equal);
+  --color-diff-changed: var(--diff-changed);
+  --color-diff-changed-bg: var(--diff-changed-bg);
+  --color-diff-only-a: var(--diff-only-a);
+  --color-diff-only-a-bg: var(--diff-only-a-bg);
+  --color-diff-only-b: var(--diff-only-b);
+  --color-diff-only-b-bg: var(--diff-only-b-bg);
+  --color-slot-a: var(--slot-a);
+  --color-slot-b: var(--slot-b);
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }

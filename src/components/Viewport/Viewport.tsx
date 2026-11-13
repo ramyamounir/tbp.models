@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getGraph, useViewerStore } from '../../state/store';
 import { createViewerScene } from '../../viewer/Scene';
-import { setViewer } from '../../viewer/sceneRegistry';
+import { setViewer, type ViewerScene } from '../../viewer/sceneRegistry';
 import { AxisGizmo } from './AxisGizmo';
 import { Legend } from './Legend';
 import { RotationPanel } from './RotationPanel';
@@ -18,17 +18,26 @@ export function Viewport() {
   const lmId = useViewerStore((s) => s.lmId);
   const hasGraph = useViewerStore((s) => getGraph(s.model, s.lmId, s.graphId) !== undefined);
   const nUnreadable = useViewerStore((s) => s.model?.lms[s.lmId]?.unreadable.length ?? 0);
+  const diffOpen = useViewerStore((s) => s.diff.open);
+  const [scene, setScene] = useState<ViewerScene | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const scene = createViewerScene(host);
-    setViewer(scene);
+    const created = createViewerScene(host);
+    setViewer(created);
+    setScene(created);
     return () => {
       setViewer(null);
-      scene.dispose();
+      setScene(null);
+      created.dispose();
     };
   }, []);
+
+  // The diff view hides this viewport (display: none) and draws its own scenes: pause the loop.
+  useEffect(() => {
+    scene?.setActive(!diffOpen);
+  }, [scene, diffOpen]);
 
   return (
     <main

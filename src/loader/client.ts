@@ -5,10 +5,13 @@
  */
 import type {
   ChannelGraph,
+  GraphOrigin,
+  LmEntry,
   ModelFile,
   ObjectGraph,
   ObjectIdCandidate,
   ObjectIdIndex,
+  OrderItem,
   UnreadableGraph,
 } from '../model/types';
 import type { LoadStage, MainToWorker, WorkerToMain } from './protocol';
@@ -121,6 +124,20 @@ function validateChannel(c: unknown, path: string): ChannelGraph {
   return { channel, kind, n, pos, x, F, features: clean, nonFiniteRows };
 }
 
+/** A loader origin: `fileId` is '' (stamped on the main thread), `lmId` the owning LM. */
+function validateOrigin(o: unknown, lmId: number, path: string): GraphOrigin {
+  check(
+    isObj(o) &&
+      o.fileId === '' &&
+      o.lmId === lmId &&
+      typeof o.entry === 'number' &&
+      Number.isSafeInteger(o.entry) &&
+      o.entry >= 0,
+    path,
+  );
+  return { fileId: '', lmId, entry: o.entry as number };
+}
+
 /** Validate the `done.model` shape before it reaches the store; throws a readable error. */
 export function validateModelFile(m: unknown): ModelFile {
   try {
@@ -151,15 +168,21 @@ export function validateModelFile(m: unknown): ModelFile {
         const channels = g.channels.map((c: unknown, k: number) =>
           validateChannel(c, `${gp}.channels[${k}]`),
         );
+        check(Array.isArray(g.patches) && g.patches.length === 0, `${gp}.patches`);
         graphs.set(gid, {
           lmId: i,
           graphId: gid,
           channels,
           centroid: g.centroid as [number, number, number],
+          origin: validateOrigin(g.origin, i, `${gp}.origin`),
+          patches: [],
         });
       }
+      const graphIds = (lm.graphIds as string[]).slice();
       check(
-        (lm.graphIds as string[]).every((g) => graphs.has(g)),
+        graphIds.every((g) => graphs.has(g)) &&
+          new Set(graphIds).size === graphIds.length &&
+          graphIds.length === graphs.size,
         `${p}.graphIds`,
       );
       const unreadable: UnreadableGraph[] = (lm.unreadable as unknown[]).map((u) => {
@@ -167,9 +190,54 @@ export function validateModelFile(m: unknown): ModelFile {
           isObj(u) && typeof u.graphId === 'string' && typeof u.reason === 'string',
           `${p}.unreadable`,
         );
-        return { graphId: u.graphId as string, reason: u.reason as string };
+        return {
+          graphId: u.graphId as string,
+          reason: u.reason as string,
+          origin: validateOrigin(u.origin, i, `${p}.unreadable.origin`),
+        };
       });
-      return { lmId: i, graphIds: (lm.graphIds as string[]).slice(), graphs, unreadable };
+      // order: 'r' items are exactly graphIds in order, 'u' items exactly unreadable in order
+      // (matched by origin entry); every on-disk entry appears once.
+      check(Array.isArray(lm.order), `${p}.order`);
+      const order: OrderItem[] = [];
+      let ri = 0;
+      let ui = 0;
+      const entries = new Set<number>();
+      for (const it of lm.order as unknown[]) {
+        check(isObj(it), `${p}.order`);
+        if (it.kind === 'r') {
+          check(it.graphId === graphIds[ri], `${p}.order`);
+          entries.add(graphs.get(graphIds[ri])!.origin.entry);
+          order.push({ kind: 'r', graphId: graphIds[ri++] });
+        } else {
+          check(it.kind === 'u' && ui < unreadable.length, `${p}.order`);
+          const u = unreadable[ui++];
+          const o = validateOrigin(it.origin, i, `${p}.order.origin`);
+          check(o.entry === u.origin.entry, `${p}.order`);
+          entries.add(o.entry);
+          order.push({ kind: 'u', origin: u.origin });
+        }
+      }
+      check(
+        ri === graphIds.length &&
+          ui === unreadable.length &&
+          entries.size === graphIds.length + unreadable.length,
+        `${p}.order`,
+      );
+      const gap = lm.gap;
+      check(gap === undefined || gap === true, `${p}.gap`);
+      let origin: LmEntry['origin'];
+      if (gap) {
+        check(lm.origin === undefined && order.length === 0, `${p}.gap`);
+      } else {
+        const o = lm.origin;
+        check(isObj(o) && o.fileId === '' && o.lmId === i, `${p}.origin`);
+        origin = { fileId: '', lmId: i };
+      }
+      const entry: LmEntry = { lmId: i, graphIds, graphs, unreadable, order };
+      if (gap) entry.gap = true;
+      else entry.origin = origin;
+      return entry;
     });
     const isMatrix = (v: unknown): v is number[][] =>
       Array.isArray(v) && v.every((r) => Array.isArray(r) && r.every((e) => typeof e === 'number'));
@@ -213,4 +281,31 @@ export function validateModelFile(m: unknown): ModelFile {
       throw new Error(`Invalid model data from loader: ${err.message}`);
     throw err;
   }
+}
+
+/**
+ * Stamps the real file id on every origin of a freshly loaded model (graph and unreadable
+ * origins, `LmEntry.origin` and the origin of every 'u' item of `order`). Returns a new model;
+ * 'u' order items share their origin object with the matching unreadable entry.
+ */
+export function stampOrigin(model: ModelFile, fileId: string): ModelFile {
+  const lms = model.lms.map((lm): LmEntry => {
+    const graphs = new Map<string, ObjectGraph>();
+    for (const [id, g] of lm.graphs) graphs.set(id, { ...g, origin: { ...g.origin, fileId } });
+    const byEntry = new Map<number, GraphOrigin>();
+    const unreadable = lm.unreadable.map((u) => {
+      const origin = { ...u.origin, fileId };
+      byEntry.set(origin.entry, origin);
+      return { ...u, origin };
+    });
+    const order = lm.order.map((o): OrderItem =>
+      o.kind === 'r'
+        ? o
+        : { kind: 'u', origin: byEntry.get(o.origin.entry) ?? { ...o.origin, fileId } },
+    );
+    const out: LmEntry = { ...lm, graphs, unreadable, order };
+    if (lm.origin) out.origin = { ...lm.origin, fileId };
+    return out;
+  });
+  return { ...model, lms };
 }

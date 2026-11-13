@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChannelGraph, ObjectGraph } from '../../model/types';
 import { activeNode, formatMm, matchedNode, nearestNode, tabOrder } from './activeNode';
+import { testOrigin } from '../../loader/testFixture';
 
 function ch(name: string, pts: number[][]): ChannelGraph {
   return {
@@ -19,6 +20,8 @@ const g: ObjectGraph = {
   lmId: 1,
   graphId: 'g',
   centroid: [0, 0, 0],
+  origin: testOrigin(1),
+  patches: [],
   channels: [
     ch('patch_1', [
       [0, 0, 0],

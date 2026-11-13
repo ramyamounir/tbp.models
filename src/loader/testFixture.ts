@@ -3,7 +3,19 @@
  * zip writer (spec Phase 2 "Malformed-input tests"). Not imported by app code.
  */
 
+import type { GraphOrigin, LmEntry } from '../model/types';
+
 const te = new TextEncoder();
+
+/** A graph origin for test literals (`ObjectGraph.origin` / `UnreadableGraph.origin`). */
+export function testOrigin(lmId = 0, entry = 0, fileId = 'test'): GraphOrigin {
+  return { fileId, lmId, entry };
+}
+
+/** `LmEntry.order` for test literals whose LM holds only readable graphs. */
+export function testOrder(graphIds: readonly string[]): LmEntry['order'] {
+  return graphIds.map((graphId) => ({ kind: 'r', graphId }));
+}
 
 /** Emits protocol-2 pickle opcodes. */
 export class PickleWriter {

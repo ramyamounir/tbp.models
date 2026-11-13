@@ -48,6 +48,85 @@ choice is the only thing the app stores (`localStorage` key `tbp-viewer-theme`).
 Below 1100 px width the inspector becomes a bottom sheet; the sidebar can be hidden with the
 top-left button.
 
+## Open files
+
+- Several `model.pt` files can be open at once. **Open model…** (several files can be picked),
+  the "Open another model.pt" row and dropping files anywhere add files and make the last one
+  active; nothing is replaced. A repeated file name is shown as `model.pt (2)`.
+- The sidebar **Open files** list shows each file's graph count, an amber dot for unsaved edits
+  and a close button. Clicking a row switches the LM selector, graph list, breadcrumb, viewport
+  and inspector to that file; each file remembers its own LM and graph.
+- Closing a file with unsaved edits asks first; leaving or reloading the page with unsaved edits
+  triggers the browser's leave confirmation. A non-blocking warning appears when the graph data
+  of all open files exceeds 512 MB.
+
+## Editing and export
+
+Edits act on whole models (object graphs) and whole LMs, in memory; nothing is written until
+export. Node data, sensor-module and motor-system state are never edited.
+
+- **Models**: rename (`F2`, double-click or the row "⋯" menu), duplicate (`Ctrl D`, gets a
+  `_copy` suffix), delete (`Del`), and **Copy to…** another LM of this file or any LM of another
+  open file (also by dragging rows onto an LM button or a file row). `Ctrl`/`Cmd`+click and
+  `Shift`+click select several rows. Name collisions are resolved with `_copy`, `_copy2`, …;
+  nothing is overwritten. Edited rows carry a green (added) or amber (renamed) marker until export.
+- **References**: renaming a model that other graphs reference through `object_id` offers
+  "Update references" (on by default), which rewrites those ids with the encoding each reference
+  already uses. Deleting a referenced model warns that its references will stop resolving.
+  Copying a parent without its children offers to copy the children too.
+- **LMs**: add (the "+" button), duplicate, delete (later LMs are renumbered down, as Monty
+  numbers them) and copy all graphs to another LM.
+- **Undo / redo** per file: top-bar buttons, `Ctrl`/`Cmd`+`Z`, `Ctrl`/`Cmd`+`Shift`+`Z`,
+  `Ctrl Y`. Edits of a file run one at a time in order.
+- **Export…** (top bar; the badge counts unsaved edits) exports the active file. The dialog shows
+  the file name (default `<name>_edited.pt`), a before / after summary, and the edits since the
+  file was opened or last exported (the most recent can be undone there, "Undo all" returns to the
+  last exported state). Export runs in a Web Worker: it re-reads the original files, rebuilds the
+  pickle through a lossless pickle tree (same container and protocol, untouched content written
+  back unchanged in value), re-parses the result with the viewer's own loader and checks it
+  against the edited view before the download starts. The opened files are never modified.
+  Models copied from another file are read from that file at export time, so the source must
+  still be readable on disk (it may be closed in the app).
+- The export dialog warns when the file references Python classes or functions outside the usual
+  Monty / numpy / torch / scipy / omegaconf set, and downloads only after "Download anyway". This
+  is a heuristic: an exported file is a pickle that `torch.load` executes, and it is only as
+  trustworthy as every file it took content from.
+- Files with repeated dictionary keys, malformed tensor storage references, unusual zip layouts
+  or pickle structures that cannot be re-encoded are refused with a message.
+
+## Diff view
+
+**Diff** in the top bar replaces the viewport and inspector with a visual comparison of two
+models; the sidebar stays, so files and models can still be browsed. Toggling it off and on keeps
+the slots, settings, view mode and selected node (the button shows a dot while a slot is set).
+
+- **Slots A and B** take any model from any open file, including two models of the same file:
+  drag a row onto a pane or the slot in its header, use "Send to diff slot ▸ A / B" in the row menu (or "Send
+  to diff" in the bulk bar with two rows selected), or pick file, LM and model in **Settings**.
+  A slot follows its model through renames, LM renumbering and their undo / redo, and empties
+  when the model, its LM or its file goes away. Unreadable graphs cannot be put in a slot.
+- **Node matching** (Settings): _nearest node in space_ (default; each A node is paired with the
+  closest unpaired B node of the same channel within the position tolerance, deterministically)
+  or _same row index_, optionally after aligning the centroids.
+- **Tolerances**: node position (% of A's bounding radius, or metres for a single-point model),
+  unmatched node count, `pose_vectors` (degrees per vector), `hsv` (hue circular), other numeric
+  features (largest absolute difference), exact `pose_fully_defined` / `on_object`, and
+  `object_id` by resolved model name. Strict / Default / Loose presets fill the table; each
+  property can be left out. Settings last for the session.
+- **Classes and colours**: equal (grey), changed (amber), only in A (red), only in B (green).
+  Views: Overlay, Side by side (linked cameras), A only, B only. A legend in each pane lists the
+  classes drawn there and toggles them; in Side by side each pane has its own.
+- **Summary panel**: verdict ("Equal within tolerance" / "Different"), node count bars and the class bar, a histogram of the distance from each A
+  node to its nearest B node with the tolerance marked, per-property share outside tolerance and
+  largest difference (click a property to colour by it), structural differences (channels or
+  features present in one model only, differing feature widths), and **Copy A / B to…**.
+- **Node diff**: click a node in any view to compare it with its partner: both node ids, a pose
+  glyph (A solid, B dashed) synced to the diff camera, and a Property / A / B / Δ table with the
+  rows outside tolerance first and highlighted ("only differences" hides the rest).
+- **Keys** while the diff view is open: `←` / `→` previous / next difference, `F` fit, `Esc`
+  clears the node selection. Below 1100 px the panel becomes a bottom sheet and Side by side
+  stacks the panes.
+
 ## Supported formats
 
 | Format                      | `_graph` type                                                                                               | Notes                                                     |
@@ -92,6 +171,26 @@ top-left button.
   `pose_fully_defined = 0`. "Display as: Edges" draws `p ± t̂ · len/2` along that tangent (as
   `tbp.teleop` `draw_2d_segments` does); the tangent is normalized because voxel averaging can
   shrink it. The inspector labels these rows `edge_tangent` / `edge_perp`.
+
+- **Fields export rewrites** (everything else, including `sm_dict`, `motor_system_dict`,
+  configs, voxel grids and KD-trees, is written back unchanged):
+  - `lm_dict` keys (the LM numbers shown in the viewer; a gap in the original keys stays a gap
+    while that LM is empty) and each LM's `graph_memory` (entry order kept; renamed models stay in
+    place, duplicates and copies are appended; keys of models that were not renamed keep their
+    original type);
+  - `graph_id_to_target` (the model's target set; a target equal to the old name is renamed with
+    the model) and `target_to_graph_id`, rebuilt as its inverse;
+  - each channel object model's `object_id` (set to the model's name when it equalled the old
+    name);
+  - `object_id` feature values in the `x` arrays of referencing graphs when "Update references"
+    was chosen (inline numpy arrays or torch storages; C-contiguous loader-supported dtypes only);
+  - `lm_to_lm_matrix`, `lm_to_lm_vote_matrix` and `sm_to_lm_matrix` after LM add / duplicate /
+    delete, rebuilt from which original LM each exported LM came from (plain lists and omegaconf
+    `ListConfig`, whose parent links and stored indices are renumbered); a matrix in another form
+    is left unchanged with a warning in the export dialog.
+
+  Tensors that share a storage still share one storage in the exported file, including in
+  duplicated and copied models.
 
 ## Development
 

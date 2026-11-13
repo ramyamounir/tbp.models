@@ -166,6 +166,40 @@ export class PointCloudLayer {
   }
 
   /**
+   * Per-node style without the legend model (diff view, spec multi-file-edit-diff Phase 7a):
+   * colours (n*3 sRGB), alpha (0 = hidden and not pickable), size scale and draw priority.
+   * Non-finite rows stay hidden.
+   */
+  setNodeStyle(
+    colors: Float32Array,
+    alphaIn: Float32Array,
+    sizeScale: Float32Array,
+    priority: Float32Array,
+  ): void {
+    const n = this.channel.n;
+    const color = this.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const alpha = this.geometry.getAttribute('alpha') as THREE.BufferAttribute;
+    const size = this.geometry.getAttribute('sizeScale') as THREE.BufferAttribute;
+    const prio = this.geometry.getAttribute('priority') as THREE.BufferAttribute;
+    (color.array as Float32Array).set(colors.subarray(0, n * 3));
+    (size.array as Float32Array).set(sizeScale.subarray(0, n));
+    (prio.array as Float32Array).set(priority.subarray(0, n));
+    const a = alpha.array as Float32Array;
+    const hidden = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const shown = this.finite[i] === 1 && alphaIn[i] > 0;
+      a[i] = shown ? alphaIn[i] : 0;
+      hidden[i] = shown ? 0 : 1;
+    }
+    color.needsUpdate = true;
+    alpha.needsUpdate = true;
+    size.needsUpdate = true;
+    prio.needsUpdate = true;
+    this.legendHidden = hidden;
+    this.lastColors = null;
+  }
+
+  /**
    * Hide the points of `mask[i] === 1` (their edge segment stands in for them); `null` shows every
    * finite node again. Hidden nodes stay pickable so clicking an edge's center still selects it.
    */

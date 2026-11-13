@@ -5,16 +5,3 @@ export function screenshotFileName(lmId: number, graphId: string | undefined): s
   const safe = (graphId ?? '').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 80) || 'model';
   return `tbp-model-viewer_lm${lmId}_${safe}.png`;
 }
-
-export function downloadBlob(blob: Blob, fileName: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  a.rel = 'noopener';
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000); // a synchronous revoke can abort the download
-}
