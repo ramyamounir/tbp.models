@@ -61,10 +61,17 @@ function values(v: ArrayLike<number> | undefined): ReactNode {
   );
 }
 
-function hsvSwatch(v: ArrayLike<number> | undefined): ReactNode {
+const isColor = (f: string): f is 'hsv' | 'rgba' => f === 'hsv' || f === 'rgba';
+
+/** Values of a color feature with a swatch of the color (hsv in 0…1, rgba in 0…255). */
+function colorSwatch(v: ArrayLike<number> | undefined, kind: 'hsv' | 'rgba'): ReactNode {
   if (!v || v.length < 3 || !Array.from(v).slice(0, 3).every(Number.isFinite)) return values(v);
   const cl = (x: number) => Math.min(1, Math.max(0, x));
-  const css = rgbToCss(hsvToRgb(cl(v[0]), cl(v[1]), cl(v[2])));
+  const css =
+    kind === 'hsv'
+      ? rgbToCss(hsvToRgb(cl(v[0]), cl(v[1]), cl(v[2])))
+      : rgbToCss([cl(v[0] / 255), cl(v[1] / 255), cl(v[2] / 255)]);
+  const digits = kind === 'hsv' ? 2 : 1;
   return (
     <span
       className="inline-flex items-center gap-1.5"
@@ -75,7 +82,9 @@ function hsvSwatch(v: ArrayLike<number> | undefined): ReactNode {
         style={{ backgroundColor: css }}
         aria-hidden="true"
       />
-      <span className="text-[10px] text-muted">{Array.from(v, (x) => fmt(x, 2)).join(' ')}</span>
+      <span className="text-[10px] text-muted">
+        {Array.from(v, (x) => fmt(x, digits)).join(' ')}
+      </span>
     </span>
   );
 }
@@ -214,19 +223,17 @@ export function NodeDiff({
       out.push({
         key,
         label: f,
-        sub: f === 'hsv' ? 'color' : undefined,
-        a:
-          f === 'hsv'
-            ? hsvSwatch(va)
-            : f === 'object_id'
-              ? objectIdText(a, channel, va)
-              : values(va),
-        b:
-          f === 'hsv'
-            ? hsvSwatch(vb)
-            : f === 'object_id'
-              ? objectIdText(b, channel, vb)
-              : values(vb),
+        sub: isColor(f) ? 'color' : undefined,
+        a: isColor(f)
+          ? colorSwatch(va, f)
+          : f === 'object_id'
+            ? objectIdText(a, channel, va)
+            : values(va),
+        b: isColor(f)
+          ? colorSwatch(vb, f)
+          : f === 'object_id'
+            ? objectIdText(b, channel, vb)
+            : values(vb),
         delta: isCompared ? deltaOf(p) : undefined,
         tol: p?.tol,
         unit: p?.unit ?? '',
