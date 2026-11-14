@@ -43,6 +43,8 @@ export interface MenuProps {
    * anchor, top edges aligned). Ignored for a point anchor.
    */
   placement?: 'below' | 'right';
+  /** Width of the root panel in px (default `MENU_WIDTH`). */
+  width?: number;
 }
 
 export const MENU_WIDTH = 236;
@@ -118,6 +120,7 @@ function Panel({
   items,
   anchor,
   mode,
+  width = MENU_WIDTH,
   autoFocus,
   panelRef,
   onActivate,
@@ -129,6 +132,7 @@ function Panel({
   items: MenuItem[];
   anchor: Rect | { x: number; y: number };
   mode: 'below' | 'right';
+  width?: number;
   autoFocus: boolean;
   panelRef: (el: HTMLDivElement | null) => void;
   onActivate(it: Item): void;
@@ -145,8 +149,8 @@ function Panel({
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setPos(place(anchor, r.width || MENU_WIDTH, r.height, mode));
-  }, [anchor, mode, items]);
+    setPos(place(anchor, r.width || width, r.height, mode));
+  }, [anchor, mode, items, width]);
 
   const focusIndex = (i: number) => buttons.current[i]?.focus();
 
@@ -169,7 +173,7 @@ function Panel({
       tabIndex={-1}
       onKeyDown={(e) => onKeyNav(e, level, focusIndex)}
       style={{
-        width: MENU_WIDTH,
+        width,
         left: pos?.left ?? 0,
         top: pos?.top ?? 0,
         visibility: pos ? 'visible' : 'hidden',
@@ -231,7 +235,7 @@ function Panel({
   );
 }
 
-export function Menu({ items, anchor, onClose, placement = 'below' }: MenuProps) {
+export function Menu({ items, anchor, onClose, placement = 'below', width }: MenuProps) {
   const closeRef = useRef(onClose);
   useEffect(() => {
     closeRef.current = onClose;
@@ -387,6 +391,7 @@ export function Menu({ items, anchor, onClose, placement = 'below' }: MenuProps)
         items={items}
         anchor={rootAnchor}
         mode={placement}
+        width={width}
         autoFocus
         level={0}
         panelRef={(el) => {

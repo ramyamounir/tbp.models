@@ -25,7 +25,8 @@ import { setDiffScene } from '../../viewer/diffSceneRegistry';
 import { DiffCanvas } from './DiffCanvas';
 import { DiffLegend } from './DiffLegend';
 import { openDiffSettings } from './diffUi';
-import { GearIcon, KindChip } from './parts';
+import { Menu, type MenuItem } from '../ui/Menu';
+import { CheckIcon, GearIcon, KindChip } from './parts';
 import { CloseIcon, SlotBadge } from './SlotStrip';
 import { useSlotDrop, type Slot } from './slotDrop';
 
@@ -144,6 +145,90 @@ function ScenePane({
 }
 
 /**
+ * The slot's input channel: a pill with the channel name and its kind. When the model has
+ * several channels the pill is a button that opens a menu of them (name, kind, node count).
+ */
+function ChannelPicker({ slot, resolved }: { slot: Slot; resolved: ResolvedSlot }) {
+  const setSlot = useViewerStore((s) => s.setSlot);
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const letter = slot.toUpperCase();
+  const current = resolved.ref.channel;
+  const seen = new Set<string>();
+  const channels = resolved.graph.channels.filter((c) => {
+    if (seen.has(c.channel)) return false;
+    seen.add(c.channel);
+    return true;
+  });
+  const pill =
+    'flex h-6 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border bg-panel pr-1.5 pl-2.5 font-mono text-[11px] text-text';
+  const name = (
+    <span className="max-w-[180px] min-w-0 truncate">
+      <DisplayName value={current} max={40} />
+    </span>
+  );
+  if (channels.length <= 1) {
+    return (
+      <span className={pill} title="Input channel compared in this slot">
+        {name}
+        <KindChip kind={resolved.channel.kind} />
+      </span>
+    );
+  }
+  const items: MenuItem[] = channels.map((c, k) => ({
+    kind: 'item',
+    id: `channel-${k}`,
+    icon: (
+      <span className={c.channel === current ? 'text-accent' : 'invisible'}>
+        <CheckIcon />
+      </span>
+    ),
+    label: (
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="min-w-0 truncate font-mono text-[12px]">
+          {displayName(c.channel, { max: 40 }).text}
+        </span>
+        <KindChip kind={c.kind} />
+      </span>
+    ),
+    shortcut: `${c.n.toLocaleString('en-US')} ${c.n === 1 ? 'node' : 'nodes'}`,
+    onSelect: () => setSlot(slot, { ...resolved.ref, channel: c.channel }),
+  }));
+  return (
+    <>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={anchor !== null}
+        aria-label={`Input channel of slot ${letter}: ${displayName(current).text}`}
+        title="Change the input channel compared in this slot"
+        onClick={(e) => setAnchor(e.currentTarget)}
+        className={`${pill} hover:border-accent hover:bg-accent-bg ${
+          anchor ? 'border-accent bg-accent-bg' : ''
+        }`}
+      >
+        {name}
+        <KindChip kind={resolved.channel.kind} />
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          className="shrink-0 text-muted"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {anchor && <Menu items={items} anchor={anchor} width={320} onClose={() => setAnchor(null)} />}
+    </>
+  );
+}
+
+/**
  * One slot in a pane header: badge, `file · LM k › name`, the input channel (a dropdown when the
  * model has several), its node count, clear. A drop target.
  */
@@ -174,28 +259,7 @@ function SlotHeader({ slot, resolved }: { slot: Slot; resolved: ResolvedSlot }) 
         </span>
         <DisplayName value={resolved.ref.graphId} max={60} />
       </div>
-      {resolved.graph.channels.length > 1 ? (
-        <select
-          aria-label={`Input channel of slot ${letter}`}
-          title="Input channel compared in this slot"
-          value={resolved.ref.channel}
-          onChange={(e) => setSlot(slot, { ...resolved.ref, channel: e.currentTarget.value })}
-          className="h-6 max-w-[112px] min-w-0 shrink rounded border border-border bg-panel px-1 font-mono text-[11px] text-text hover:border-accent"
-        >
-          {[...new Set(resolved.graph.channels.map((c) => c.channel))].map((name) => (
-            <option key={name} value={name}>
-              {displayName(name, { max: 40 }).text}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <span className="max-w-[150px] min-w-0 shrink truncate font-mono text-[11px] text-muted">
-          <DisplayName value={resolved.ref.channel} max={40} />
-        </span>
-      )}
-      <span className="@max-[340px]:hidden">
-        <KindChip kind={resolved.channel.kind} />
-      </span>
+      <ChannelPicker slot={slot} resolved={resolved} />
       <span className="shrink-0 font-mono text-[11px] text-faint @max-[380px]:hidden">
         {resolved.channel.n.toLocaleString('en-US')} nodes
       </span>

@@ -1,8 +1,8 @@
 /**
  * Right panel of the diff view (spec multi-file-edit-diff Phase 7a "Minimal right panel",
  * extended in Phase 7b "Summary panel", mockup 08): the drop hint, the single slot's model, or
- * the full summary of the comparison (the two compared channels, distance histogram and the
- * features table). While a node is
+ * the summary of the comparison (distance histogram and the features table; the models and
+ * channels compared are named in the pane headers). While a node is
  * selected the node diff panel (`NodeDiff`) replaces the summary.
  */
 import { useMemo, type ReactNode } from 'react';
@@ -71,7 +71,10 @@ function HistogramSection({ result, indexMode }: { result: DiffResult; indexMode
   const unit = h.unit === 'm' ? 'm' : '%R';
   const fmtU = (v: number) => formatDelta(v, unit);
   return (
-    <section aria-label="Distance histogram" className="border-t border-border pt-4">
+    <section
+      aria-label="Distance histogram"
+      className="border-t border-border pt-4 first:border-t-0 first:pt-0"
+    >
       <SectionLabel>
         {indexMode ? 'Position offset of matched pairs' : 'Distance to nearest B node'}
       </SectionLabel>
@@ -194,20 +197,12 @@ function FeaturesSection({
       .sort((p, q) => STATUS_RANK[p.r.status] - STATUS_RANK[q.r.status] || p.k - q.k)
       .map((x) => x.r);
   }, [structure, result]);
-  const count = (st: FeatureStatus) => structure.filter((f) => f.status === st).length;
-  const tally: { n: number; text: string; cls: string }[] = [
-    { n: count('both'), text: 'in both', cls: 'text-text' },
-    { n: count('only-a'), text: 'only in A', cls: 'text-diff-only-a' },
-    { n: count('only-b'), text: 'only in B', cls: 'text-diff-only-b' },
-    {
-      n: count('width'),
-      text: count('width') === 1 ? 'width differs' : 'widths differ',
-      cls: 'text-diff-changed',
-    },
-  ].filter((t, k) => k === 0 || t.n > 0);
 
   return (
-    <section aria-label="Features" className="border-t border-border pt-4">
+    <section
+      aria-label="Features"
+      className="border-t border-border pt-4 first:border-t-0 first:pt-0"
+    >
       <SectionLabel
         right={
           result && (
@@ -217,14 +212,6 @@ function FeaturesSection({
       >
         Features
       </SectionLabel>
-      <p className="mt-1.5 flex flex-wrap gap-x-2 text-[11px]">
-        {tally.map((t, k) => (
-          <span key={t.text} className={t.cls}>
-            {k > 0 && <span className="mr-2 text-faint">·</span>}
-            <span className="font-mono font-semibold">{t.n}</span> {t.text}
-          </span>
-        ))}
-      </p>
       <div className={`${ROW_GRID} mt-3 text-[10px] font-medium text-muted`}>
         <span>Feature</span>
         <span className="text-center text-slot-a">A</span>
@@ -339,29 +326,6 @@ function FeaturesSection({
   );
 }
 
-/** The two compared channels: slot, model, channel name and kind, node count. */
-function ComparedChannels({ a, b }: { a: ResolvedSlot; b: ResolvedSlot }) {
-  return (
-    <ul className="mt-2 flex flex-col gap-1">
-      {(['a', 'b'] as const).map((s) => {
-        const r = s === 'a' ? a : b;
-        return (
-          <li key={s} className="flex min-w-0 items-center gap-2 font-mono text-[12px] text-text">
-            <SlotBadge slot={s} size={18} />
-            <span className="min-w-0 truncate">
-              <DisplayName value={r.ref.channel} max={40} />
-            </span>
-            <KindChip kind={r.channel.kind} />
-            <span className="ml-auto shrink-0 text-[11px] text-faint">
-              {n0(r.channel.n)} {r.channel.n === 1 ? 'node' : 'nodes'}
-            </span>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
 export function DiffSummary({ status }: { status: DiffStatus }) {
   const match = useViewerStore((s) => s.diff.settings.match);
   const selection = useViewerStore((s) => s.diff.selection);
@@ -387,42 +351,17 @@ export function DiffSummary({ status }: { status: DiffStatus }) {
     const resolved = status.slot === 'a' ? status.a : status.b;
     body = resolved ? <SingleSlot slot={status.slot} resolved={resolved} /> : null;
   } else {
-    const { a, b } = status;
-    const same = a.ref.graphId === b.ref.graphId;
-    const header = (
-      <>
-        <SectionLabel>Diff · A vs B</SectionLabel>
-        <h2
-          className="mt-1 flex min-w-0 items-baseline gap-2 font-mono text-[20px] font-semibold text-text"
-          title={same ? a.ref.graphId : `${a.ref.graphId} vs ${b.ref.graphId}`}
-        >
-          {same ? (
-            <DisplayName value={a.ref.graphId} max={80} />
-          ) : (
-            <>
-              <DisplayName value={a.ref.graphId} max={40} />
-              <span className="shrink-0 font-sans text-[13px] font-normal text-faint">vs</span>
-              <DisplayName value={b.ref.graphId} max={40} />
-            </>
-          )}
-        </h2>
-      </>
-    );
     const structure =
       status.status === 'done'
         ? status.result.structure
         : featureStructure(status.a.channel, status.b.channel);
     body = (
       <div className="flex flex-col gap-4">
-        <div>
-          {header}
-          <ComparedChannels a={a} b={b} />
-          {status.status === 'comparing' && (
-            <p className="mt-3 text-[12px] text-muted" role="status">
-              Comparing…
-            </p>
-          )}
-        </div>
+        {status.status === 'comparing' && (
+          <p className="text-[12px] text-muted" role="status">
+            Comparing…
+          </p>
+        )}
         {status.status === 'done' && (
           <HistogramSection result={status.result} indexMode={match === 'index'} />
         )}

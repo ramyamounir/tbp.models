@@ -122,7 +122,7 @@ the slots, settings, view mode and selected node (the button shows a dot while a
 - **Classes and colours**: equal (grey), changed (amber), only in A (red), only in B (green).
   Views: Overlay, Side by side (linked cameras), A only, B only. A legend in each pane lists the
   classes drawn there and toggles them; in Side by side each pane has its own.
-- **Summary panel**: the two compared channels, a histogram of the distance from each A node to
+- **Summary panel**: a histogram of the distance from each A node to
   its nearest B node with the tolerance marked, and the **Features** table: one row per feature
   of either channel, with a cell for A and a cell for B (the number of values per node, or a
   dashed gap where the feature is missing), and for the features both have the share of paired

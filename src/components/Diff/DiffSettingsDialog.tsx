@@ -1,8 +1,8 @@
 /**
  * Diff settings dialog (spec multi-file-edit-diff Phase 7b "Settings dialog", mockup 07): slot
  * pickers (file / LM / model / input channel), node matching and the "EQUAL WITHIN" tolerance
- * table with presets, which lists the features of the two chosen channels (a feature only one
- * channel has, or with different widths, is listed but cannot be compared). Everything is a draft
+ * table with presets, which lists the features both chosen channels have with the same width (the
+ * only ones that can be compared). Everything is a draft
  * until Apply (one `setDiffSettings` plus `setSlot` for changed slots).
  *
  * Feature names are file data: the per-feature draft is a `Map` keyed by the raw name, React
@@ -277,8 +277,6 @@ interface RowSpec {
   label: ReactNode;
   metric: ReactNode;
   enabled: boolean;
-  /** Why the row cannot be compared (only in one slot, different widths): listed, disabled. */
-  skip?: string;
   onToggle?(on: boolean): void;
   tol?: {
     value: number;
@@ -295,7 +293,7 @@ interface RowSpec {
 }
 
 function TolRow({ r }: { r: RowSpec }) {
-  const off = !r.enabled || r.skip !== undefined;
+  const off = !r.enabled;
   const t = r.tol;
   const sliderMax = t ? (t.sliderMax ?? t.range[1]) : 1;
   return (
@@ -304,8 +302,8 @@ function TolRow({ r }: { r: RowSpec }) {
         <input
           type="checkbox"
           aria-label={`Compare ${typeof r.label === 'string' ? r.label : r.key}`}
-          checked={r.enabled && r.skip === undefined}
-          disabled={r.skip !== undefined || !r.onToggle}
+          checked={r.enabled}
+          disabled={!r.onToggle}
           onChange={(e) => r.onToggle?.(e.currentTarget.checked)}
           className="accent-[var(--accent)]"
         />
@@ -318,7 +316,7 @@ function TolRow({ r }: { r: RowSpec }) {
       <td
         className={`py-2 pr-2 text-[12px] text-muted max-[640px]:hidden ${off ? 'opacity-50' : ''}`}
       >
-        {r.skip ?? r.metric}
+        {r.metric}
       </td>
       <td className="py-2 pr-3">
         <div className={`flex items-center gap-2 ${off ? 'opacity-50' : ''}`}>
@@ -442,20 +440,13 @@ export function DiffSettingsDialog() {
   ];
   for (const name of orderFeatures(features.keys())) {
     const info = features.get(name)!;
-    const skip =
-      info.status === 'only-a'
-        ? 'only in A'
-        : info.status === 'only-b'
-          ? 'only in B'
-          : info.status === 'width'
-            ? `width ${info.widthA} in A, ${info.widthB} in B`
-            : undefined;
+    // A feature only one channel has, or with different widths, cannot be compared: not listed.
+    if (info.status !== 'both') continue;
     const t = featureTolerance(draft, name);
     const base = {
       key: featureKey(name),
       label: <DisplayName value={name} max={40} />,
       enabled: t.enabled,
-      skip,
       onToggle: (on: boolean) => setFeature(name, { enabled: on, tol: t.tol }),
     } as const;
     if (name === 'object_id') {
