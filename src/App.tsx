@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ChannelPrompt } from './components/Diff/ChannelPrompt';
 import { DiffView } from './components/Diff/DiffView';
 import { DisclaimerBanner } from './components/DisclaimerBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -107,6 +108,7 @@ export default function App() {
         />
       )}
       <CopyChildrenPromptHost />
+      <ChannelPrompt />
       <ToastHost />
     </div>
   );

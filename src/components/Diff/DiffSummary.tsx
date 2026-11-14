@@ -1,26 +1,26 @@
 /**
  * Right panel of the diff view (spec multi-file-edit-diff Phase 7a "Minimal right panel",
  * extended in Phase 7b "Summary panel", mockup 08): the drop hint, the single slot's model, or
- * the full summary of the comparison (verdict, distance histogram,
- * properties, structure) with the footer (Settings…, Copy A to…, Copy B to…). While a node is
+ * the full summary of the comparison (the two compared channels, distance histogram and the
+ * features table). While a node is
  * selected the node diff panel (`NodeDiff`) replaces the summary.
  */
-import { useMemo, useState, type ReactNode } from 'react';
-import type { DiffResult } from '../../diff/compare';
-import type { DiffStatus, ResolvedSlot } from '../../diff/useDiff';
+import { useMemo, type ReactNode } from 'react';
 import {
-  effectiveProperty,
-  graphNodeCount,
-  isValidSelection,
-  structureLines,
-} from '../../diff/viewClasses';
+  featureStructure,
+  type DiffResult,
+  type FeatureStatus,
+  type FeatureStructure,
+  type PropertyResult,
+} from '../../diff/compare';
+import { featureKey, type DiffPropertyKey } from '../../diff/settings';
+import type { DiffStatus, ResolvedSlot } from '../../diff/useDiff';
+import { effectiveProperty, isValidSelection } from '../../diff/viewClasses';
 import { useViewerStore } from '../../state/store';
 import { DisplayName } from '../../util/DisplayName';
-import { CopyToMenu } from '../Sidebar/CopyToMenu';
-import { openDiffSettings } from './diffUi';
 import { NodeDiff } from './NodeDiff';
-import { btnSecondary, formatDelta } from './diffFormat';
-import { CheckIcon, GearIcon, SectionLabel as Label, WarnIcon } from './parts';
+import { formatDelta } from './diffFormat';
+import { KindChip, SectionLabel as Label } from './parts';
 import { SlotBadge } from './SlotStrip';
 import type { Slot } from './slotDrop';
 
@@ -32,7 +32,7 @@ const n0 = (v: number) => v.toLocaleString('en-US');
 
 function SingleSlot({ slot, resolved }: { slot: Slot; resolved: ResolvedSlot }) {
   const other = slot === 'a' ? 'B' : 'A';
-  const n = graphNodeCount(resolved.graph);
+  const n = resolved.channel.n;
   return (
     <>
       <SectionLabel>Diff</SectionLabel>
@@ -45,6 +45,10 @@ function SingleSlot({ slot, resolved }: { slot: Slot; resolved: ResolvedSlot }) 
             <span className="shrink-0">LM {resolved.ref.lmId} ›</span>
             <DisplayName value={resolved.ref.graphId} max={60} />
           </div>
+          <span className="flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-muted">
+            <DisplayName value={resolved.ref.channel} max={40} />
+            <KindChip kind={resolved.channel.kind} />
+          </span>
           <span className="font-mono text-[11px] text-faint">
             {n.toLocaleString('en-US')} {n === 1 ? 'node' : 'nodes'}
           </span>
@@ -109,70 +113,221 @@ function HistogramSection({ result, indexMode }: { result: DiffResult; indexMode
   );
 }
 
-function PropertiesSection({ result }: { result: DiffResult }) {
+const STATUS_RANK: Record<FeatureStatus, number> = { both: 0, width: 1, 'only-a': 2, 'only-b': 3 };
+
+/** Presence of a feature in one slot's channel: its width in the slot colour, or a dashed gap. */
+function PresenceCell({ slot, width, warn }: { slot: Slot; width?: number; warn?: boolean }) {
+  const letter = slot.toUpperCase();
+  if (width === undefined) {
+    return (
+      <span
+        title={`Not in ${letter}`}
+        aria-label={`not in ${letter}`}
+        className="flex h-[18px] w-7 items-center justify-center rounded border border-dashed border-border text-[10px] text-faint"
+      >
+        –
+      </span>
+    );
+  }
+  return (
+    <span
+      title={`In ${letter} · ${width} ${width === 1 ? 'value' : 'values'} per node`}
+      aria-label={`in ${letter}, width ${width}`}
+      className={`flex h-[18px] w-7 items-center justify-center rounded font-mono text-[10px] font-semibold text-white ${
+        slot === 'a' ? 'bg-slot-a' : 'bg-slot-b'
+      } ${warn ? 'ring-2 ring-diff-changed' : ''}`}
+    >
+      {width}
+    </span>
+  );
+}
+
+const ROW_GRID = 'grid w-full grid-cols-[minmax(0,1fr)_28px_28px_66px] items-center gap-2';
+
+interface FeatureRow {
+  key: DiffPropertyKey;
+  label: string;
+  widthA?: number;
+  widthB?: number;
+  status: FeatureStatus;
+  prop?: PropertyResult;
+}
+
+/**
+ * One table for the features of the two channels: which side has each feature (and how many
+ * values it holds per node), and for the features both sides have, the share of paired nodes
+ * outside the tolerance. Features both have come first, then different widths, then the ones
+ * only A or only B has. A compared row is a button that colours the panes by that feature.
+ */
+function FeaturesSection({
+  structure,
+  result,
+}: {
+  structure: readonly FeatureStructure[];
+  result?: DiffResult;
+}) {
   const property = useViewerStore((s) => s.diff.property);
   const setDiffProperty = useViewerStore((s) => s.setDiffProperty);
   const active = effectiveProperty(result, property);
+  const rows = useMemo(() => {
+    const propOf = (key: DiffPropertyKey) => result?.properties.find((p) => p.key === key);
+    const out: FeatureRow[] = [
+      {
+        key: 'position',
+        label: 'node position',
+        widthA: 3,
+        widthB: 3,
+        status: 'both',
+        prop: propOf('position'),
+      },
+      ...structure.map((f) => ({
+        key: featureKey(f.name),
+        label: f.name,
+        widthA: f.widthA,
+        widthB: f.widthB,
+        status: f.status,
+        prop: propOf(featureKey(f.name)),
+      })),
+    ];
+    return out
+      .map((r, k) => ({ r, k }))
+      .sort((p, q) => STATUS_RANK[p.r.status] - STATUS_RANK[q.r.status] || p.k - q.k)
+      .map((x) => x.r);
+  }, [structure, result]);
+  const count = (st: FeatureStatus) => structure.filter((f) => f.status === st).length;
+  const tally: { n: number; text: string; cls: string }[] = [
+    { n: count('both'), text: 'in both', cls: 'text-text' },
+    { n: count('only-a'), text: 'only in A', cls: 'text-diff-only-a' },
+    { n: count('only-b'), text: 'only in B', cls: 'text-diff-only-b' },
+    {
+      n: count('width'),
+      text: count('width') === 1 ? 'width differs' : 'widths differ',
+      cls: 'text-diff-changed',
+    },
+  ].filter((t, k) => k === 0 || t.n > 0);
+
   return (
-    <section aria-label="Properties" className="border-t border-border pt-4">
+    <section aria-label="Features" className="border-t border-border pt-4">
       <SectionLabel
-        right={<span className="text-[11px] text-faint">click to color by Δ · again to clear</span>}
+        right={
+          result && (
+            <span className="text-[11px] text-faint">click to color by Δ · again to clear</span>
+          )
+        }
       >
-        Properties
+        Features
       </SectionLabel>
-      <ul className="mt-2 -mx-2 flex flex-col">
-        {result.properties.map((p) => {
-          const share = p.paired > 0 ? p.outside / p.paired : 0;
-          const on = p.key === active;
+      <p className="mt-1.5 flex flex-wrap gap-x-2 text-[11px]">
+        {tally.map((t, k) => (
+          <span key={t.text} className={t.cls}>
+            {k > 0 && <span className="mr-2 text-faint">·</span>}
+            <span className="font-mono font-semibold">{t.n}</span> {t.text}
+          </span>
+        ))}
+      </p>
+      <div className={`${ROW_GRID} mt-3 text-[10px] font-medium text-muted`}>
+        <span>Feature</span>
+        <span className="text-center text-slot-a">A</span>
+        <span className="text-center text-slot-b">B</span>
+        <span className="text-right">{result ? 'changed' : ''}</span>
+      </div>
+      <ul className="-mx-2 mt-1 flex flex-col">
+        {rows.map((r) => {
+          const p = r.prop;
+          const compared = p?.compared === true;
+          const on = compared && r.key === active;
+          const share = p && p.paired > 0 ? p.outside / p.paired : 0;
           const pct = (share * 100).toFixed(1).replace(/\.0$/, '');
-          return (
-            <li key={p.key}>
-              <button
-                type="button"
-                disabled={!p.compared}
-                aria-pressed={on}
-                onClick={() => setDiffProperty(on ? 'any' : p.key)}
-                className={`flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left disabled:cursor-default ${
-                  on ? 'bg-accent-bg' : p.compared ? 'hover:bg-row-alt' : ''
+          let value: ReactNode;
+          let valueCls = 'text-faint';
+          let valueTitle: string | undefined;
+          if (r.status === 'only-a') {
+            value = 'only in A';
+            valueCls = 'text-diff-only-a';
+          } else if (r.status === 'only-b') {
+            value = 'only in B';
+            valueCls = 'text-diff-only-b';
+          } else if (r.status === 'width') {
+            value = 'width';
+            valueCls = 'text-diff-changed';
+            valueTitle = `Not compared: ${r.widthA} values per node in A, ${r.widthB} in B`;
+          } else if (!result) {
+            value = '';
+          } else if (!compared) {
+            value = 'off';
+            valueTitle = 'Not compared: turned off in the diff settings';
+          } else if (p.paired === 0) {
+            value = '—';
+            valueTitle = 'No paired nodes to compare';
+          } else {
+            value = `${pct} %`;
+            valueCls = p.outside > 0 ? 'text-diff-changed' : 'text-diff-only-b';
+            valueTitle = `${n0(p.outside)} of ${n0(p.paired)} paired nodes outside the tolerance`;
+          }
+          const head = (
+            <span className={ROW_GRID}>
+              <span
+                className={`min-w-0 truncate font-mono text-[12px] ${
+                  on
+                    ? 'font-semibold text-accent'
+                    : r.status === 'both' && (compared || !result)
+                      ? 'text-text'
+                      : 'text-muted'
                 }`}
               >
-                <span className="flex w-full items-baseline gap-2">
-                  <span
-                    className={`min-w-0 flex-1 truncate font-mono text-[12px] ${
-                      on ? 'font-semibold text-accent' : p.compared ? 'text-text' : 'text-faint'
-                    }`}
-                  >
-                    <DisplayName value={p.label} max={40} />
-                  </span>
-                  <span
-                    className={`shrink-0 font-mono text-[12px] font-semibold ${
-                      !p.compared
-                        ? 'text-faint'
-                        : p.outside > 0
-                          ? 'text-diff-changed'
-                          : 'text-diff-only-b'
-                    }`}
-                  >
-                    {p.compared ? `${pct} %` : '—'}
-                  </span>
-                </span>
+                <DisplayName value={r.label} max={40} />
+              </span>
+              <PresenceCell slot="a" width={r.widthA} warn={r.status === 'width'} />
+              <PresenceCell slot="b" width={r.widthB} warn={r.status === 'width'} />
+              <span
+                title={valueTitle}
+                className={`truncate text-right font-mono text-[11px] font-semibold ${valueCls}`}
+              >
+                {value}
+              </span>
+            </span>
+          );
+          if (!compared || !p) {
+            return (
+              <li key={r.key} className="px-2 py-1.5">
+                {head}
+              </li>
+            );
+          }
+          const tol =
+            r.key === 'feature:object_id' || p.tol === 0
+              ? 'exact'
+              : `tol ${formatDelta(p.tol, p.unit)}`;
+          const detail =
+            p.paired === 0
+              ? 'no paired nodes'
+              : p.outside === 0
+                ? 'equal'
+                : r.key === 'feature:object_id'
+                  ? `${n0(p.outside)} differ`
+                  : `max ${formatDelta(p.max, p.unit)}`;
+          return (
+            <li key={r.key}>
+              <button
+                type="button"
+                aria-pressed={on}
+                onClick={() => setDiffProperty(on ? 'any' : r.key)}
+                className={`flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left ${
+                  on ? 'bg-accent-bg' : 'hover:bg-row-alt'
+                }`}
+              >
+                {head}
                 <span className="flex w-full items-center gap-2">
-                  <span className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-full bg-row-alt">
-                    {p.compared && p.outside > 0 && (
+                  <span className="h-[5px] min-w-[24px] flex-1 overflow-hidden rounded-full bg-row-alt">
+                    {p.outside > 0 && (
                       <span
                         className="block h-full rounded-full bg-diff-changed"
                         style={{ width: `${Math.max(2, share * 100)}%` }}
                       />
                     )}
                   </span>
-                  <span className="w-[86px] shrink-0 text-right font-mono text-[10px] text-faint">
-                    {!p.compared
-                      ? 'not compared'
-                      : p.outside === 0
-                        ? 'equal'
-                        : p.key === 'feature:object_id'
-                          ? `${n0(p.outside)} differ`
-                          : `max ${formatDelta(p.max, p.unit)}`}
+                  <span className="shrink-0 text-right font-mono text-[10px] text-faint">
+                    {detail} · {tol}
                   </span>
                 </span>
               </button>
@@ -184,81 +339,34 @@ function PropertiesSection({ result }: { result: DiffResult }) {
   );
 }
 
-function StructureSection({ a, b }: { a: ResolvedSlot; b: ResolvedSlot }) {
-  const lines = useMemo(() => {
-    const all = structureLines(a.graph, b.graph);
-    return [...all.filter((l) => l.ok), ...all.filter((l) => !l.ok)];
-  }, [a.graph, b.graph]);
+/** The two compared channels: slot, model, channel name and kind, node count. */
+function ComparedChannels({ a, b }: { a: ResolvedSlot; b: ResolvedSlot }) {
   return (
-    <section aria-label="Structure" className="border-t border-border pt-4">
-      <SectionLabel>Structure</SectionLabel>
-      <ul className="mt-2 flex flex-col gap-1.5">
-        {lines.map((l, k) => (
-          <li
-            key={k}
-            className={`flex items-start gap-2 text-[12px] ${l.ok ? 'text-text' : 'text-diff-changed'}`}
-          >
-            <span className={`mt-0.5 shrink-0 ${l.ok ? 'text-diff-only-b' : 'text-diff-changed'}`}>
-              {l.ok ? <CheckIcon /> : <WarnIcon />}
-            </span>
-            <span className="min-w-0 break-words">{l.text}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/** Footer: Settings…, Copy A to…, Copy B to… (the Phase 3b chooser for that slot's model). */
-function Footer({ a, b }: { a?: ResolvedSlot; b?: ResolvedSlot }) {
-  const [menu, setMenu] = useState<{ slot: Slot; anchor: HTMLElement } | undefined>();
-  const slotOf = (s: Slot) => (s === 'a' ? a : b);
-  const open = menu ? slotOf(menu.slot) : undefined;
-  const source = useMemo(
-    () =>
-      open
-        ? { fileId: open.ref.fileId, lmId: open.ref.lmId, graphIds: [open.ref.graphId] }
-        : undefined,
-    [open],
-  );
-  return (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border px-5 py-3">
-      <button type="button" className={btnSecondary} onClick={openDiffSettings}>
-        <GearIcon />
-        Settings…
-      </button>
+    <ul className="mt-2 flex flex-col gap-1">
       {(['a', 'b'] as const).map((s) => {
-        const r = slotOf(s);
+        const r = s === 'a' ? a : b;
         return (
-          <button
-            key={s}
-            type="button"
-            className={btnSecondary}
-            disabled={!r}
-            aria-haspopup="menu"
-            title={
-              r ? `Copy ${r.ref.graphId} to another LM or file` : `Slot ${s.toUpperCase()} is empty`
-            }
-            onClick={(e) => setMenu({ slot: s, anchor: e.currentTarget })}
-          >
-            Copy {s.toUpperCase()} to…
-          </button>
+          <li key={s} className="flex min-w-0 items-center gap-2 font-mono text-[12px] text-text">
+            <SlotBadge slot={s} size={18} />
+            <span className="min-w-0 truncate">
+              <DisplayName value={r.ref.channel} max={40} />
+            </span>
+            <KindChip kind={r.channel.kind} />
+            <span className="ml-auto shrink-0 text-[11px] text-faint">
+              {n0(r.channel.n)} {r.channel.n === 1 ? 'node' : 'nodes'}
+            </span>
+          </li>
         );
       })}
-      {menu && source && (
-        <CopyToMenu source={source} anchor={menu.anchor} onClose={() => setMenu(undefined)} />
-      )}
-    </div>
+    </ul>
   );
 }
 
 export function DiffSummary({ status }: { status: DiffStatus }) {
   const match = useViewerStore((s) => s.diff.settings.match);
   const selection = useViewerStore((s) => s.diff.selection);
-  const a = status.status === 'empty' ? undefined : status.a;
-  const b = status.status === 'empty' ? undefined : status.b;
 
-  if (status.status === 'done' && isValidSelection(status.a.graph, status.b.graph, selection)) {
+  if (status.status === 'done' && isValidSelection(status.a.channel, status.b.channel, selection)) {
     return (
       <aside aria-label="Node diff" className="flex min-h-0 flex-1 flex-col">
         <NodeDiff a={status.a} b={status.b} result={status.result} selection={selection} />
@@ -300,51 +408,34 @@ export function DiffSummary({ status }: { status: DiffStatus }) {
         </h2>
       </>
     );
-    if (status.status === 'comparing') {
-      body = (
-        <>
+    const structure =
+      status.status === 'done'
+        ? status.result.structure
+        : featureStructure(status.a.channel, status.b.channel);
+    body = (
+      <div className="flex flex-col gap-4">
+        <div>
           {header}
-          <p className="mt-3 text-[12px] text-muted" role="status">
-            Comparing…
-          </p>
-        </>
-      );
-    } else {
-      const r = status.result;
-      const equal = r.verdict === 'equal';
-      body = (
-        <div className="flex flex-col gap-4">
-          <div>
-            {/* Two different names need the full width: the verdict pill then sits below them. */}
-            <div className={same ? 'flex items-start gap-2' : 'flex flex-col items-start gap-2'}>
-              <div className={same ? 'min-w-0 flex-1' : 'w-full min-w-0'}>{header}</div>
-              <span
-                role="status"
-                className={`${same ? 'mt-4 ' : ''}flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium ${
-                  equal
-                    ? 'bg-diff-only-b-bg text-diff-only-b'
-                    : 'bg-diff-changed-bg text-diff-changed'
-                }`}
-              >
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${equal ? 'bg-diff-only-b' : 'bg-diff-changed'}`}
-                  aria-hidden="true"
-                />
-                {equal ? 'Equal within tolerance' : 'Different'}
-              </span>
-            </div>
-          </div>
-          <HistogramSection result={r} indexMode={match === 'index'} />
-          <PropertiesSection result={r} />
-          <StructureSection a={a} b={b} />
+          <ComparedChannels a={a} b={b} />
+          {status.status === 'comparing' && (
+            <p className="mt-3 text-[12px] text-muted" role="status">
+              Comparing…
+            </p>
+          )}
         </div>
-      );
-    }
+        {status.status === 'done' && (
+          <HistogramSection result={status.result} indexMode={match === 'index'} />
+        )}
+        <FeaturesSection
+          structure={structure}
+          result={status.status === 'done' ? status.result : undefined}
+        />
+      </div>
+    );
   }
   return (
     <aside aria-label="Diff summary" className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto p-5">{body}</div>
-      <Footer a={a} b={b} />
     </aside>
   );
 }

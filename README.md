@@ -104,25 +104,33 @@ the slots, settings, view mode and selected node (the button shows a dot while a
 - **Slots A and B** take any model from any open file, including two models of the same file:
   drag a row onto a pane or the slot in its header, use "Send to diff slot ▸ A / B" in the row menu (or "Send
   to diff" in the bulk bar with two rows selected), or pick file, LM and model in **Settings**.
+  A slot holds **one input channel** of a model, because each input channel of a model is its own
+  graph with its own features: a model with several channels asks which one to compare when it is
+  put in a slot, and the dropdown in the pane header (or Settings) switches it afterwards. The
+  two slots may hold channels with different names or kinds, or two channels of the same model.
   A slot follows its model through renames, LM renumbering and their undo / redo, and empties
   when the model, its LM or its file goes away. Unreadable graphs cannot be put in a slot.
 - **Node matching** (Settings): _nearest node in space_ (default; each A node is paired with the
-  closest unpaired B node of the same channel within the position tolerance, deterministically)
-  or _same row index_, optionally after aligning the centroids.
-- **Tolerances**: node position (% of A's bounding radius, or metres for a single-point model),
-  unmatched node count, `pose_vectors` (degrees per vector), `hsv` (hue circular), other numeric
+  closest unpaired B node within the position tolerance, deterministically)
+  or _same row index_, optionally after aligning the centroids of the two channels (off by default).
+- **Tolerances**: node position (% of the bounding radius of A's channel, or metres for a
+  single-point channel), `pose_vectors` (degrees per vector), `hsv` (hue circular), other numeric
   features (largest absolute difference), exact `pose_fully_defined` / `on_object`, and
   `object_id` by resolved model name. Strict / Default / Loose presets fill the table; each
-  property can be left out. Settings last for the session.
+  feature can be left out. Only features that both channels have, with the same width, are
+  compared. Settings last for the session.
 - **Classes and colours**: equal (grey), changed (amber), only in A (red), only in B (green).
   Views: Overlay, Side by side (linked cameras), A only, B only. A legend in each pane lists the
   classes drawn there and toggles them; in Side by side each pane has its own.
-- **Summary panel**: verdict ("Equal within tolerance" / "Different"), a histogram of the distance from each A
-  node to its nearest B node with the tolerance marked, per-property share outside tolerance and
-  largest difference (click a property to colour by it), structural differences (channels or
-  features present in one model only, differing feature widths), and **Copy A / B to…**.
+- **Summary panel**: the two compared channels, a histogram of the distance from each A node to
+  its nearest B node with the tolerance marked, and the **Features** table: one row per feature
+  of either channel, with a cell for A and a cell for B (the number of values per node, or a
+  dashed gap where the feature is missing), and for the features both have the share of paired
+  nodes outside tolerance, the largest difference and the tolerance (click a row to colour by
+  it). Features only in A, only in B or with different widths are listed last. There is no
+  overall equal / different verdict.
 - **Node diff**: click a node in any view to compare it with its partner: both node ids, a pose
-  glyph (A solid, B dashed) synced to the diff camera, and a Property / A / B / Δ table with the
+  glyph (A solid, B dashed) synced to the diff camera, and a Feature / A / B / Δ table with the
   rows outside tolerance first and highlighted ("only differences" hides the rest).
 - **Keys** while the diff view is open: `←` / `→` previous / next difference, `F` fit, `Esc`
   clears the node selection. Below 1100 px the panel becomes a bottom sheet that its "Summary" handle

@@ -2,8 +2,7 @@
  * "Copy to…" chooser (spec multi-file-edit-diff Phase 3b "Copy to… chooser"). One module owns the
  * target list, the copy itself (children prompt → one `runEdit` on the target file's chain →
  * confirmation toast) and the popover, so every entry point behaves the same: the row menu, the
- * bulk bar, the LM "⋯" menu, a drop on a file row that lacks the LM and (Phase 7b) the diff
- * summary footer.
+ * bulk bar, the LM "⋯" menu and a drop on a file row that lacks the LM.
  *
  * File names and model names are file-derived: rendered only as React text (menu labels, dialog
  * text) or plain toast text.

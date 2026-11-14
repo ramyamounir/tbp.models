@@ -1,14 +1,16 @@
 /**
  * Diff settings dialog (spec multi-file-edit-diff Phase 7b "Settings dialog", mockup 07): slot
- * pickers (file / LM / model), node matching, the "EQUAL WITHIN" tolerance table with presets,
- * and a note listing the structural differences known before comparing. Everything is a draft
+ * pickers (file / LM / model / input channel), node matching and the "EQUAL WITHIN" tolerance
+ * table with presets, which lists the features of the two chosen channels (a feature only one
+ * channel has, or with different widths, is listed but cannot be compared). Everything is a draft
  * until Apply (one `setDiffSettings` plus `setSlot` for changed slots).
  *
  * Feature names are file data: the per-feature draft is a `Map` keyed by the raw name, React
  * keys are `featureKey(name)`, and names are rendered only as React text (`DisplayName`).
  */
 import { useMemo, useState, type ReactNode } from 'react';
-import { diffRadius } from '../../diff/match';
+import { featureStructure, type FeatureStructure } from '../../diff/compare';
+import { channelRadius } from '../../diff/match';
 import {
   applyPreset,
   DIFF_RANGES,
@@ -20,39 +22,57 @@ import {
   type PropertyTolerance,
 } from '../../diff/settings';
 import { resolveSlot } from '../../diff/useDiff';
-import { graphNodeCount, structureLines } from '../../diff/viewClasses';
-import type { ObjectGraph } from '../../model/types';
+import type { ChannelGraph } from '../../model/types';
 import { useViewerStore, type OpenFile, type SlotRef } from '../../state/store';
 import { DisplayName } from '../../util/DisplayName';
 import { formatMm } from '../Inspector/activeNode';
 import { Dialog } from '../ui/Dialog';
 import { closeDiffSettings } from './diffUi';
 import { btnPrimary, btnSecondary, iconProps } from './diffFormat';
-import { KindChip, WarnIcon } from './parts';
+import { KindChip } from './parts';
 import { SlotBadge } from './SlotStrip';
+import { defaultChannel } from './slotChannel';
 import type { Slot } from './slotDrop';
 
-/** A slot being edited: a file and LM, and a model once one is picked. */
+/** A slot being edited: a file and LM, and a model and its input channel once one is picked. */
 interface SlotDraft {
   fileId?: string;
   lmId: number;
   graphId?: string;
+  channel?: string;
 }
 
 const draftOf = (ref: SlotRef | undefined): SlotDraft =>
-  ref ? { fileId: ref.fileId, lmId: ref.lmId, graphId: ref.graphId } : { lmId: 0 };
+  ref
+    ? { fileId: ref.fileId, lmId: ref.lmId, graphId: ref.graphId, channel: ref.channel }
+    : { lmId: 0 };
 
 const sameRef = (d: SlotDraft, ref: SlotRef | undefined) =>
-  d.fileId === ref?.fileId && d.graphId === ref?.graphId && (!ref || d.lmId === ref.lmId);
+  d.fileId === ref?.fileId &&
+  d.graphId === ref?.graphId &&
+  d.channel === ref?.channel &&
+  (!ref || d.lmId === ref.lmId);
 
 function refOf(files: readonly OpenFile[], d: SlotDraft): SlotRef | undefined {
-  if (d.fileId === undefined || d.graphId === undefined) return undefined;
-  const ref = { fileId: d.fileId, lmId: d.lmId, graphId: d.graphId };
+  if (d.fileId === undefined || d.graphId === undefined || d.channel === undefined)
+    return undefined;
+  const ref = { fileId: d.fileId, lmId: d.lmId, graphId: d.graphId, channel: d.channel };
   return resolveSlot(files, ref) ? ref : undefined;
 }
 
+/** A draft for model `graphId` of LM `lmId`, keeping the channel name `prefer` when it has one. */
+function draftFor(file: OpenFile, lmId: number, graphId: string | undefined, prefer?: string) {
+  const g = graphId !== undefined ? file.view.lms[lmId]?.graphs.get(graphId) : undefined;
+  return { fileId: file.id, lmId, graphId, channel: defaultChannel(g, prefer) };
+}
+
 /** First LM (from `prefer`) of a file with a readable graph, and its graph (same name if any). */
-function pickIn(file: OpenFile, preferLm: number, preferGraph?: string): SlotDraft {
+function pickIn(
+  file: OpenFile,
+  preferLm: number,
+  preferGraph?: string,
+  preferChannel?: string,
+): SlotDraft {
   const lms = file.view.lms;
   const order = [preferLm, ...lms.map((l) => l.lmId).filter((k) => k !== preferLm)];
   for (const k of order) {
@@ -60,7 +80,7 @@ function pickIn(file: OpenFile, preferLm: number, preferGraph?: string): SlotDra
     if (!lm || lm.graphIds.length === 0) continue;
     const graphId =
       preferGraph !== undefined && lm.graphs.has(preferGraph) ? preferGraph : lm.graphIds[0];
-    return { fileId: file.id, lmId: k, graphId };
+    return draftFor(file, k, graphId, preferChannel);
   }
   return { fileId: file.id, lmId: Math.min(preferLm, Math.max(0, lms.length - 1)) };
 }
@@ -83,7 +103,9 @@ function SlotCard({
   const file = files.find((f) => f.id === draft.fileId);
   const lm = file?.view.lms[draft.lmId];
   const graph = draft.graphId !== undefined ? lm?.graphs.get(draft.graphId) : undefined;
-  const n = graph ? graphNodeCount(graph) : 0;
+  const channel = graph?.channels.find((c) => c.channel === draft.channel);
+  const n = channel?.n ?? 0;
+  const nf = channel ? Object.keys(channel.features).length : 0;
   return (
     <div
       role="group"
@@ -110,7 +132,7 @@ function SlotCard({
                 type="button"
                 role="radio"
                 aria-checked={on}
-                onClick={() => !on && onChange(pickIn(f, draft.lmId, draft.graphId))}
+                onClick={() => !on && onChange(pickIn(f, draft.lmId, draft.graphId, draft.channel))}
                 className={`h-6 max-w-[160px] min-w-0 shrink-0 rounded px-2 font-mono text-[11px] ${
                   on ? 'bg-panel font-semibold text-text shadow-sm' : 'text-faint hover:text-text'
                 }`}
@@ -131,14 +153,16 @@ function SlotCard({
             if (!file) return;
             const k = Number(e.currentTarget.value);
             const next = file.view.lms[k];
-            onChange({
-              fileId: file.id,
-              lmId: k,
-              graphId:
+            onChange(
+              draftFor(
+                file,
+                k,
                 next && draft.graphId !== undefined && next.graphs.has(draft.graphId)
                   ? draft.graphId
                   : next?.graphIds[0],
-            });
+                draft.channel,
+              ),
+            );
           }}
         >
           {!file && <option value="">LM –</option>}
@@ -155,7 +179,7 @@ function SlotCard({
           value={draft.graphId ?? ''}
           onChange={(e) => {
             const v = e.currentTarget.value;
-            onChange({ ...draft, graphId: v === '' ? undefined : v });
+            if (file) onChange(draftFor(file, draft.lmId, v === '' ? undefined : v, draft.channel));
           }}
         >
           <option value="">
@@ -168,11 +192,29 @@ function SlotCard({
           ))}
         </select>
       </div>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="w-[84px] shrink-0 text-[11px] text-muted">Input channel</span>
+        <select
+          aria-label={`Input channel of slot ${letter}`}
+          className={`${selectCls} flex-1`}
+          disabled={!graph || graph.channels.length === 0}
+          value={channel ? channel.channel : ''}
+          onChange={(e) => onChange({ ...draft, channel: e.currentTarget.value })}
+        >
+          {!channel && <option value="">{graph ? 'no input channel' : '–'}</option>}
+          {[...new Set(graph?.channels.map((c) => c.channel) ?? [])].map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        {channel && <KindChip kind={channel.kind} />}
+      </div>
       <p className="truncate font-mono text-[11px] text-faint">
-        {graph
-          ? `${n.toLocaleString('en-US')} ${n === 1 ? 'node' : 'nodes'} · ${graph.channels
-              .map((c) => c.channel)
-              .join(', ')}`
+        {channel
+          ? `${n.toLocaleString('en-US')} ${n === 1 ? 'node' : 'nodes'} · ${nf} ${
+              nf === 1 ? 'feature' : 'features'
+            }`
           : 'empty · pick a model or drop one on the slot'}
       </p>
     </div>
@@ -233,11 +275,10 @@ function NumberField({
 interface RowSpec {
   key: string;
   label: ReactNode;
-  kind?: 'sm' | 'lm';
   metric: ReactNode;
   enabled: boolean;
-  /** Row present in only one slot (listed, disabled). */
-  only?: 'A' | 'B';
+  /** Why the row cannot be compared (only in one slot, different widths): listed, disabled. */
+  skip?: string;
   onToggle?(on: boolean): void;
   tol?: {
     value: number;
@@ -254,7 +295,7 @@ interface RowSpec {
 }
 
 function TolRow({ r }: { r: RowSpec }) {
-  const off = !r.enabled || r.only !== undefined;
+  const off = !r.enabled || r.skip !== undefined;
   const t = r.tol;
   const sliderMax = t ? (t.sliderMax ?? t.range[1]) : 1;
   return (
@@ -263,8 +304,8 @@ function TolRow({ r }: { r: RowSpec }) {
         <input
           type="checkbox"
           aria-label={`Compare ${typeof r.label === 'string' ? r.label : r.key}`}
-          checked={r.enabled && r.only === undefined}
-          disabled={r.only !== undefined || !r.onToggle}
+          checked={r.enabled && r.skip === undefined}
+          disabled={r.skip !== undefined || !r.onToggle}
           onChange={(e) => r.onToggle?.(e.currentTarget.checked)}
           className="accent-[var(--accent)]"
         />
@@ -272,13 +313,12 @@ function TolRow({ r }: { r: RowSpec }) {
       <td className={`py-2 pr-2 ${off ? 'opacity-50' : ''}`}>
         <span className="flex min-w-0 items-center gap-2 font-mono text-[12px] text-text">
           <span className="min-w-0 truncate">{r.label}</span>
-          {r.kind && <KindChip kind={r.kind} />}
         </span>
       </td>
       <td
         className={`py-2 pr-2 text-[12px] text-muted max-[640px]:hidden ${off ? 'opacity-50' : ''}`}
       >
-        {r.only ? `only in ${r.only}` : r.metric}
+        {r.skip ?? r.metric}
       </td>
       <td className="py-2 pr-3">
         <div className={`flex items-center gap-2 ${off ? 'opacity-50' : ''}`}>
@@ -325,28 +365,11 @@ function TolRow({ r }: { r: RowSpec }) {
   );
 }
 
-/** Feature name → where it appears in the two drafted graphs. */
-interface FeatureInfo {
-  inA: boolean;
-  inB: boolean;
-  kind: 'sm' | 'lm';
-}
-
-function featureInfo(a?: ObjectGraph, b?: ObjectGraph): Map<string, FeatureInfo> {
-  const out = new Map<string, FeatureInfo>();
-  const add = (g: ObjectGraph | undefined, side: 'inA' | 'inB') => {
-    for (const c of g?.channels ?? []) {
-      for (const f of Object.keys(c.features)) {
-        if (!Object.prototype.hasOwnProperty.call(c.features, f)) continue;
-        const have = out.get(f) ?? { inA: false, inB: false, kind: c.kind };
-        have[side] = true;
-        out.set(f, have);
-      }
-    }
-  };
-  add(a, 'inA');
-  add(b, 'inB');
-  return out;
+/** The features listed in the table: both channels' when both are drafted, else one channel's. */
+function draftFeatures(a?: ChannelGraph, b?: ChannelGraph): Map<string, FeatureStructure> {
+  const one = a ?? b;
+  const list = a && b ? featureStructure(a, b) : one ? featureStructure(one, one) : [];
+  return new Map(list.map((f) => [f.name, f]));
 }
 
 /** `pose_vectors`, `hsv`, the others alphabetically, `object_id` last. */
@@ -381,14 +404,10 @@ export function DiffSettingsDialog() {
 
   const refA = refOf(files, slotA);
   const refB = refOf(files, slotB);
-  const graphA = resolveSlot(files, refA)?.graph;
-  const graphB = resolveSlot(files, refB)?.graph;
-  const radius = useMemo(() => (graphA ? diffRadius(graphA) : 0), [graphA]);
-  const features = useMemo(() => featureInfo(graphA, graphB), [graphA, graphB]);
-  const structural = useMemo(
-    () => (graphA && graphB ? structureLines(graphA, graphB).filter((l) => !l.ok) : []),
-    [graphA, graphB],
-  );
+  const channelA = resolveSlot(files, refA)?.channel;
+  const channelB = resolveSlot(files, refB)?.channel;
+  const radius = useMemo(() => (channelA ? channelRadius(channelA) : 0), [channelA]);
+  const features = useMemo(() => draftFeatures(channelA, channelB), [channelA, channelB]);
 
   /** Edit of the draft: any change other than a preset makes it 'custom'. */
   const edit = (patch: Partial<DiffSettings>) =>
@@ -415,36 +434,28 @@ export function DiffSettingsDialog() {
         unit: '% of R',
         onChange: (v) => edit({ positionPct: v }),
         after:
-          graphA && radius >= 1e-9 ? `≈ ${formatMm((draft.positionPct / 100) * radius)}` : 'exact',
-      },
-    },
-    {
-      key: 'count',
-      label: 'node count',
-      metric: 'difference',
-      enabled: draft.countEnabled,
-      onToggle: (on) => edit({ countEnabled: on }),
-      tol: {
-        value: draft.countTol,
-        range: DIFF_RANGES.countTol,
-        sliderMax: 100,
-        step: 1,
-        integer: true,
-        unit: 'nodes',
-        onChange: (v) => edit({ countTol: Math.round(v) }),
+          channelA && radius >= 1e-9
+            ? `≈ ${formatMm((draft.positionPct / 100) * radius)}`
+            : 'exact',
       },
     },
   ];
   for (const name of orderFeatures(features.keys())) {
     const info = features.get(name)!;
-    const only = info.inA && !info.inB ? 'A' : !info.inA && info.inB ? 'B' : undefined;
+    const skip =
+      info.status === 'only-a'
+        ? 'only in A'
+        : info.status === 'only-b'
+          ? 'only in B'
+          : info.status === 'width'
+            ? `width ${info.widthA} in A, ${info.widthB} in B`
+            : undefined;
     const t = featureTolerance(draft, name);
     const base = {
       key: featureKey(name),
       label: <DisplayName value={name} max={40} />,
-      kind: info.kind,
       enabled: t.enabled,
-      only: graphA && graphB ? only : undefined,
+      skip,
       onToggle: (on: boolean) => setFeature(name, { enabled: on, tol: t.tol }),
     } as const;
     if (name === 'object_id') {
@@ -490,7 +501,7 @@ export function DiffSettingsDialog() {
       open
       width={740}
       title="Diff settings"
-      subtitle="Pick any model from any open file for each slot, or drag one in from the sidebar. A and B can be the same file."
+      subtitle="Pick a model from any open file and one of its input channels for each slot. A and B can be the same file, or two channels of the same model."
       onCancel={closeDiffSettings}
       footer={
         <>
@@ -619,7 +630,7 @@ export function DiffSettingsDialog() {
               <thead className="bg-row-alt text-[11px] text-muted">
                 <tr>
                   <th className="w-8 py-1.5 pl-3" aria-label="Compare" />
-                  <th className="py-1.5 pr-2 font-medium">Property</th>
+                  <th className="py-1.5 pr-2 font-medium">Feature</th>
                   <th className="py-1.5 pr-2 font-medium max-[640px]:hidden">Metric</th>
                   <th className="py-1.5 pr-3 font-medium">Tolerance</th>
                 </tr>
@@ -631,26 +642,6 @@ export function DiffSettingsDialog() {
               </tbody>
             </table>
           </div>
-          {structural.length > 0 && (
-            <div
-              role="note"
-              className="mt-3 flex items-start gap-2 rounded-md bg-diff-changed-bg px-3 py-2 text-[12px] text-diff-changed"
-            >
-              <span className="mt-0.5 shrink-0">
-                <WarnIcon />
-              </span>
-              <div className="min-w-0">
-                <p>Reported as structural differences:</p>
-                <ul className="mt-0.5 list-disc pl-4">
-                  {structural.map((l, k) => (
-                    <li key={k} className="break-words">
-                      {l.text}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
         </section>
       </div>
     </Dialog>

@@ -1,11 +1,12 @@
 /**
  * Drop handling for diff slots (spec multi-file-edit-diff Phase 7a "Drop targets"): the slots
  * in the pane headers and the panes accept graph-row drags of this tab only, through `graphDrag.ts`.
- * Nothing is parsed from `dataTransfer`; the validated payload builds the slot refs.
+ * Nothing is parsed from `dataTransfer`; the validated payload builds the slot requests (a model
+ * with several input channels asks which one to compare, see `slotChannel.ts`).
  */
 import { useState, type DragEvent } from 'react';
 import { acceptsGraphDrag, readGraphDrop } from '../../state/graphDrag';
-import { useViewerStore } from '../../state/store';
+import { requestSlots } from './slotChannel';
 
 export type Slot = 'a' | 'b';
 export const otherSlot = (s: Slot): Slot => (s === 'a' ? 'b' : 'a');
@@ -44,10 +45,15 @@ export function useSlotDrop(slot: Slot): { over: boolean; props: SlotDropProps }
       e.stopPropagation();
       const payload = readGraphDrop(e);
       if (payload === null) return;
-      const { setSlot } = useViewerStore.getState();
-      const ref = (graphId: string) => ({ fileId: payload.fileId, lmId: payload.lmId, graphId });
-      setSlot(slot, ref(payload.graphIds[0]));
-      if (payload.graphIds.length >= 2) setSlot(otherSlot(slot), ref(payload.graphIds[1]));
+      const target = (graphId: string) => ({
+        fileId: payload.fileId,
+        lmId: payload.lmId,
+        graphId,
+      });
+      const requests = [{ slot, target: target(payload.graphIds[0]) }];
+      if (payload.graphIds.length >= 2)
+        requests.push({ slot: otherSlot(slot), target: target(payload.graphIds[1]) });
+      requestSlots(requests);
     },
   };
   return { over, props };

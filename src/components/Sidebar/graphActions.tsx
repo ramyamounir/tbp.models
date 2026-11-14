@@ -6,8 +6,8 @@
 import type { ReactNode } from 'react';
 import type { GraphOrigin } from '../../model/types';
 import { duplicateGraphsAction, requestDeleteGraphs } from '../../state/editUi';
-import { useViewerStore } from '../../state/store';
 import type { MenuItem } from '../ui/Menu';
+import { requestSlot } from '../Diff/slotChannel';
 import { copyTargetItems } from './CopyToMenu';
 
 export interface GraphActionContext {
@@ -98,9 +98,12 @@ function CompareIcon() {
   );
 }
 
-/** Puts a readable graph in diff slot `slot` (does not open the diff view; Phase 7a). */
+/**
+ * Puts a readable graph in diff slot `slot` (does not open the diff view; Phase 7a). A graph
+ * with several input channels asks which one to compare.
+ */
 function sendToSlot(slot: 'a' | 'b', fileId: string, lmId: number, graphId: string): void {
-  useViewerStore.getState().setSlot(slot, { fileId, lmId, graphId });
+  requestSlot(slot, { fileId, lmId, graphId });
 }
 
 const rowCount = (ctx: GraphActionContext) => ctx.graphIds.length + ctx.unreadableOrigins.length;

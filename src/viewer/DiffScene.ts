@@ -1,10 +1,10 @@
 /**
  * One pane of the diff view (spec multi-file-edit-diff Phase 7a "DiffScene"): a reduced sibling
- * of `Scene.ts` that draws one or two object graphs coloured by diff class.
+ * of `Scene.ts` that draws one input channel of one or two models coloured by diff class.
  *
  *   scene
- *   └── graph group per graph (position = −offset, so A and B overlap as in the comparison)
- *       ├── Points per channel (PointCloudLayer, raw pos)
+ *   └── group per channel (position = −offset, so A and B overlap as in the comparison)
+ *       ├── Points (PointCloudLayer, raw pos)
  *       └── selection / hover rings (raw node pos)
  *
  * Cameras and controls come from `cameraRig.ts` (shared with the main viewport). Colours are the
@@ -12,14 +12,15 @@
  */
 import * as THREE from 'three';
 import { NodeClass } from '../diff/compare';
-import type { ObjectGraph } from '../model/types';
+import { channelCentroid, channelRadius } from '../diff/match';
+import type { ChannelGraph } from '../model/types';
 import { useViewerStore, type Tool } from '../state/store';
 import { readToken } from '../theme/readToken';
 import { createCameraRig, type CameraState } from './cameraRig';
 import { cssToRgb, type RGB } from './colors';
 import { buildRingMarker, disposeObject } from './Glyphs';
 import { Picker, type PickHit } from './Picker';
-import { graphRadius, PointCloudLayer } from './PointCloudLayer';
+import { PointCloudLayer } from './PointCloudLayer';
 
 export type { CameraState } from './cameraRig';
 
@@ -33,22 +34,22 @@ const HOVER_RING_PX = 18;
 const MIN_PRIORITY_LIFT = 0.005;
 
 export interface DiffSceneGraph {
-  graph: ObjectGraph;
-  /** The graph's group is translated by −offset. */
+  /** The slot's input channel. */
+  channel: ChannelGraph;
+  /** The channel's group is translated by −offset. */
   offset: Vec3;
   /**
-   * NodeClass per node, keyed by channel name. Undefined = no comparison (one slot filled): the
-   * graph is drawn plainly in the default point colour.
+   * NodeClass per node. Undefined = no comparison (one slot filled): the channel is drawn
+   * plainly in the default point colour.
    */
-  classes?: Map<string, Uint8Array>;
+  classes?: Uint8Array;
   /** Which classes are drawn (hidden classes are also not pickable). */
   show: (cls: NodeClass) => boolean;
 }
 
-/** A node of one of the scene's graphs (index into `DiffSceneInput.graphs`). */
+/** A node of one of the scene's channels (`graph` indexes `DiffSceneInput.graphs`). */
 export interface DiffSceneNode {
   graph: 0 | 1;
-  channel: string;
   index: number;
   /** Text label next to the ring ("#212"); none when undefined. */
   label?: string;
@@ -117,6 +118,12 @@ interface GraphLayers {
   layers: PointCloudLayer[];
 }
 
+/** Bounding radius of a channel about its centroid; 0.01 when degenerate (like `graphRadius`). */
+function boundRadius(c: ChannelGraph): number {
+  const r = channelRadius(c);
+  return r >= 1e-6 ? r : 0.01;
+}
+
 export function createDiffScene(container: HTMLElement, opts: DiffSceneOptions): DiffScene {
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -173,7 +180,7 @@ export function createDiffScene(container: HTMLElement, opts: DiffSceneOptions):
       for (const l of g.layers) {
         const c = l.channel;
         const n = c.n;
-        const cls = classes?.get(c.channel);
+        const cls = classes;
         const col = new Float32Array(n * 3);
         const alpha = new Float32Array(n);
         const scale = new Float32Array(n);
@@ -185,7 +192,6 @@ export function createDiffScene(container: HTMLElement, opts: DiffSceneOptions):
             alpha[i] = 1;
             scale[i] = plainScale;
           } else {
-            // A channel missing from the class map (duplicate name) counts as unmatched.
             const k = (cls && i < cls.length ? cls[i] : NodeClass.OnlyA) as NodeClass;
             rgb = classColor(colors, k);
             const shown = show(k);
@@ -207,9 +213,8 @@ export function createDiffScene(container: HTMLElement, opts: DiffSceneOptions):
     }
   }
 
-  function nodePos(node: { graph: number; channel: string; index: number }): THREE.Vector3 | null {
-    const g = graphs[node.graph];
-    const c = g?.layers.find((l) => l.channel.channel === node.channel)?.channel;
+  function nodePos(node: { graph: number; index: number }): THREE.Vector3 | null {
+    const c = graphs[node.graph]?.input.channel;
     if (!c || node.index < 0 || node.index >= c.n) return null;
     const x = c.pos[3 * node.index];
     const y = c.pos[3 * node.index + 1];
@@ -278,7 +283,7 @@ export function createDiffScene(container: HTMLElement, opts: DiffSceneOptions):
       return;
     }
     const centroidOf = (g: GraphLayers) => {
-      const [cx, cy, cz] = g.input.graph.centroid;
+      const [cx, cy, cz] = channelCentroid(g.input.channel);
       const [ox, oy, oz] = g.input.offset;
       return new THREE.Vector3(cx - ox, cy - oy, cz - oz);
     };
@@ -286,7 +291,7 @@ export function createDiffScene(container: HTMLElement, opts: DiffSceneOptions):
     let r = 0;
     for (const g of graphs) {
       const d = centroidOf(g).distanceTo(center);
-      r = Math.max(r, graphRadius(g.input.graph) + (Number.isFinite(d) ? d : 0));
+      r = Math.max(r, boundRadius(g.input.channel) + (Number.isFinite(d) ? d : 0));
     }
     R = r > 0 ? r : 0.01;
   }
@@ -310,24 +315,22 @@ export function createDiffScene(container: HTMLElement, opts: DiffSceneOptions):
       const group = new THREE.Group();
       group.position.set(-gi.offset[0], -gi.offset[1], -gi.offset[2]);
       root.add(group);
-      const lift = MIN_PRIORITY_LIFT * graphRadius(gi.graph);
-      const layers = gi.graph.channels.map((c) => {
-        const l = new PointCloudLayer(c, gi.graph.centroid, lift);
-        group.add(l.points);
-        return l;
-      });
-      return { input: gi, group, layers };
+      const lift = MIN_PRIORITY_LIFT * boundRadius(gi.channel);
+      const [cx, cy, cz] = channelCentroid(gi.channel);
+      const layer = new PointCloudLayer(gi.channel, [cx, cy, cz], lift);
+      group.add(layer.points);
+      return { input: gi, group, layers: [layer] };
     });
     root.updateMatrixWorld(true);
     computeBounds();
   }
 
-  /** Same graphs and offsets: only colours, visibility or selection changed. */
+  /** Same channels and offsets: only colours, visibility or selection changed. */
   const sameGraphs = (a: DiffSceneInput, b: DiffSceneInput) =>
     a.graphs.length === b.graphs.length &&
     a.graphs.every(
       (g, k) =>
-        g.graph === b.graphs[k].graph &&
+        g.channel === b.graphs[k].channel &&
         g.offset[0] === b.graphs[k].offset[0] &&
         g.offset[1] === b.graphs[k].offset[1] &&
         g.offset[2] === b.graphs[k].offset[2],
@@ -367,7 +370,7 @@ export function createDiffScene(container: HTMLElement, opts: DiffSceneOptions):
     if (!hit?.layer) return null;
     const k = graphs.findIndex((g) => g.layers.includes(hit.layer!));
     if (k !== 0 && k !== 1) return null;
-    return { graph: k, channel: hit.channel, index: hit.index };
+    return { graph: k, index: hit.index };
   };
 
   const picker = new Picker({

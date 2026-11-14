@@ -113,16 +113,21 @@ export function newFileId(): string {
   return `f${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
 }
 
-/** A model in a diff slot (spec multi-file-edit-diff Phase 6 "Store"). */
+/**
+ * One input channel of a model in a diff slot (spec multi-file-edit-diff Phase 6 "Store"): the
+ * comparison is between the two slots' channels, which may have different names.
+ */
 export interface SlotRef {
   fileId: string;
   lmId: number;
   graphId: string;
+  /** Channel name within the graph (the first one with that name). */
+  channel: string;
 }
 export type DiffMode = 'overlay' | 'side' | 'a' | 'b';
+/** A node of a slot's channel. */
 export interface DiffSelection {
   side: 'a' | 'b';
-  channel: string;
   index: number;
 }
 /** Diff view state; kept across toggling, file switches and graph selection. */
@@ -149,7 +154,13 @@ export const initialDiffState = (): DiffState => ({
 });
 
 const sameSlot = (p: SlotRef | undefined, q: SlotRef | undefined) =>
-  p === q || (!!p && !!q && p.fileId === q.fileId && p.lmId === q.lmId && p.graphId === q.graphId);
+  p === q ||
+  (!!p &&
+    !!q &&
+    p.fileId === q.fileId &&
+    p.lmId === q.lmId &&
+    p.graphId === q.graphId &&
+    p.channel === q.channel);
 
 /**
  * Slot repair after `rec` was applied to file `fileId` in `direction` (Phase 6 "Slot repair");
@@ -166,7 +177,8 @@ export function repairSlots(
     if (!slot || slot.fileId !== fileId) return slot;
     const m = mapAddress(rec, { lmId: slot.lmId, graphId: slot.graphId }, direction);
     if (m === null) return undefined; // removed, even if the address exists in the new view
-    const next = m === undefined ? slot : { fileId, lmId: m.lmId, graphId: m.graphId };
+    const next =
+      m === undefined ? slot : { fileId, lmId: m.lmId, graphId: m.graphId, channel: slot.channel };
     if (!view.lms[next.lmId]?.graphs.has(next.graphId)) return undefined;
     return sameSlot(next, slot) ? slot : next;
   };
@@ -280,7 +292,11 @@ export interface ViewerState {
   // ---- diff (Phase 6) ----
   /** Flips `diff.open` only; nothing else in the diff state is reset. */
   toggleDiff(): void;
-  /** Fills (or clears with undefined) a slot; ignored unless `ref` is a readable graph of an open file. */
+  /**
+   * Fills (or clears with undefined) a slot; ignored unless `ref` is a channel of a readable
+   * graph of an open file. UI code goes through `requestSlot` (slotChannel.ts), which asks for
+   * the channel.
+   */
   setSlot(slot: 'a' | 'b', ref: SlotRef | undefined): void;
   swapSlots(): void;
   /** Patches the settings; any change other than `preset` sets `preset: 'custom'`. */
@@ -855,8 +871,14 @@ export const useViewerStore = create<ViewerState>()(
           if (ref) {
             const f = s.files.find((x) => x.id === ref.fileId);
             // Unreadable graphs (not in `graphs`) cannot be put in a slot.
-            if (!f?.view.lms[ref.lmId]?.graphs.has(ref.graphId)) return s;
-            next = { fileId: ref.fileId, lmId: ref.lmId, graphId: ref.graphId };
+            const g = f?.view.lms[ref.lmId]?.graphs.get(ref.graphId);
+            if (!g?.channels.some((c) => c.channel === ref.channel)) return s;
+            next = {
+              fileId: ref.fileId,
+              lmId: ref.lmId,
+              graphId: ref.graphId,
+              channel: ref.channel,
+            };
           }
           if (sameSlot(next, s.diff[slot])) return s;
           return { diff: { ...s.diff, [slot]: next, selection: undefined } };
@@ -903,9 +925,7 @@ export const useViewerStore = create<ViewerState>()(
         set((s) => ({
           diff: {
             ...s.diff,
-            selection: selection
-              ? { side: selection.side, channel: selection.channel, index: selection.index }
-              : undefined,
+            selection: selection ? { side: selection.side, index: selection.index } : undefined,
           },
         }));
       },

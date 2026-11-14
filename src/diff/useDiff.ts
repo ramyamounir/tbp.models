@@ -1,23 +1,25 @@
 /**
  * The diff result for the store's slots and settings (spec multi-file-edit-diff Phase 6
- * "Store"): derived, not stored. Memoised on the two graph objects, both files'
+ * "Store"): derived, not stored. Memoised on the two channel objects, both files'
  * `view.objectIdIndex` and the settings object (identity), so an edit that changes either
- * file's object_id index re-runs the comparison even when the slot graphs are unchanged.
+ * file's object_id index re-runs the comparison even when the slot channels are unchanged.
  * The comparison runs in a `setTimeout(0)` after a "comparing" state has been rendered.
  */
 import { useEffect, useState } from 'react';
-import type { ModelFile, ObjectGraph, ObjectIdIndex } from '../model/types';
+import type { ChannelGraph, ModelFile, ObjectGraph, ObjectIdIndex } from '../model/types';
 import { useViewerStore, type OpenFile, type SlotRef } from '../state/store';
-import { diffGraphs, type DiffResult } from './compare';
+import { diffChannels, type DiffResult } from './compare';
 import type { DiffSettings } from './settings';
 
 export interface ResolvedSlot {
   ref: SlotRef;
   file: OpenFile;
   graph: ObjectGraph;
+  /** The compared channel: `ref.channel` of `graph`. */
+  channel: ChannelGraph;
 }
 
-/** The slot's file and readable graph, or undefined when either no longer exists. */
+/** The slot's file, readable graph and channel, or undefined when any no longer exists. */
 export function resolveSlot(
   files: readonly OpenFile[],
   ref: SlotRef | undefined,
@@ -25,7 +27,8 @@ export function resolveSlot(
   if (!ref) return undefined;
   const file = files.find((f) => f.id === ref.fileId);
   const graph = file?.view.lms[ref.lmId]?.graphs.get(ref.graphId);
-  return file && graph ? { ref, file, graph } : undefined;
+  const channel = graph?.channels.find((c) => c.channel === ref.channel);
+  return file && graph && channel ? { ref, file, graph, channel } : undefined;
 }
 
 export type DiffStatus =
@@ -35,16 +38,16 @@ export type DiffStatus =
   | { status: 'done'; a: ResolvedSlot; b: ResolvedSlot; result: DiffResult };
 
 interface Inputs {
-  graphA: ObjectGraph;
-  graphB: ObjectGraph;
+  channelA: ChannelGraph;
+  channelB: ChannelGraph;
   indexA: ObjectIdIndex;
   indexB: ObjectIdIndex;
   settings: DiffSettings;
 }
 
 const sameInputs = (p: Inputs, q: Inputs) =>
-  p.graphA === q.graphA &&
-  p.graphB === q.graphB &&
+  p.channelA === q.channelA &&
+  p.channelB === q.channelB &&
   p.indexA === q.indexA &&
   p.indexB === q.indexB &&
   p.settings === q.settings;
@@ -61,7 +64,7 @@ export function cachedDiff(inputs: Inputs): DiffResult | undefined {
 export function computeDiff(inputs: Inputs, aFile: ModelFile, bFile: ModelFile): DiffResult {
   const hit = cachedDiff(inputs);
   if (hit) return hit;
-  const result = diffGraphs(inputs.graphA, aFile, inputs.graphB, bFile, inputs.settings);
+  const result = diffChannels(inputs.channelA, aFile, inputs.channelB, bFile, inputs.settings);
   cache = { inputs, result };
   return result;
 }
@@ -76,8 +79,8 @@ export function useDiff(): DiffStatus {
   const inputs: Inputs | undefined =
     a && b
       ? {
-          graphA: a.graph,
-          graphB: b.graph,
+          channelA: a.channel,
+          channelB: b.channel,
           indexA: a.file.view.objectIdIndex,
           indexB: b.file.view.objectIdIndex,
           settings,
@@ -88,8 +91,8 @@ export function useDiff(): DiffStatus {
   const hit = inputs ? cachedDiff(inputs) : undefined;
   const current = inputs && done && sameInputs(done.inputs, inputs) ? done.result : hit;
 
-  const graphA = inputs?.graphA;
-  const graphB = inputs?.graphB;
+  const channelA = inputs?.channelA;
+  const channelB = inputs?.channelB;
   const indexA = inputs?.indexA;
   const indexB = inputs?.indexB;
   const needsRun = inputs !== undefined && current === undefined;
@@ -97,15 +100,15 @@ export function useDiff(): DiffStatus {
   const bView = b?.file.view;
 
   useEffect(() => {
-    if (!needsRun || !graphA || !graphB || !indexA || !indexB || !aView || !bView) return;
-    const run: Inputs = { graphA, graphB, indexA, indexB, settings };
+    if (!needsRun || !channelA || !channelB || !indexA || !indexB || !aView || !bView) return;
+    const run: Inputs = { channelA, channelB, indexA, indexB, settings };
     const t = setTimeout(() => {
       setDone({ inputs: run, result: computeDiff(run, aView, bView) });
     }, 0);
     return () => clearTimeout(t);
     // aView / bView are read for object_id resolution only; their objectIdIndex is a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needsRun, graphA, graphB, indexA, indexB, settings]);
+  }, [needsRun, channelA, channelB, indexA, indexB, settings]);
 
   if (!a && !b) return { status: 'empty' };
   if (!a || !b) return { status: 'single', slot: a ? 'a' : 'b', a, b };
@@ -123,8 +126,8 @@ export function currentDiffResult(): DiffResult | undefined {
   const b = resolveSlot(s.files, s.diff.b);
   if (!a || !b) return undefined;
   return cachedDiff({
-    graphA: a.graph,
-    graphB: b.graph,
+    channelA: a.channel,
+    channelB: b.channel,
     indexA: a.file.view.objectIdIndex,
     indexB: b.file.view.objectIdIndex,
     settings: s.diff.settings,

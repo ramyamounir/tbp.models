@@ -16,7 +16,7 @@ export type PresetName = 'strict' | 'default' | 'loose';
 export interface DiffSettings {
   match: MatchMode;
   alignCentroids: boolean;
-  /** % of A's bounding radius R. */
+  /** % of the bounding radius R of A's channel. */
   positionPct: number;
   /**
    * false: node position is left out of the comparison (no 'position' property; in 'nearest'
@@ -24,10 +24,6 @@ export interface DiffSettings {
    * enable checkbox on every row (requirements "Each property has a checkbox").
    */
   positionEnabled: boolean;
-  /** Unmatched nodes allowed for an "equal" verdict. */
-  countTol: number;
-  /** false: unmatched nodes do not affect the verdict (the "node count" row's checkbox). */
-  countEnabled: boolean;
   poseVectorsDeg: PropertyTolerance;
   hsv: PropertyTolerance;
   objectId: { enabled: boolean };
@@ -41,7 +37,6 @@ export interface DiffSettings {
 /** Slider ranges of the settings table (position matches the inspector's MATCH_RADIUS_MAX). */
 export const DIFF_RANGES = {
   positionPct: [0, 10],
-  countTol: [0, 1000],
   poseVectorsDeg: [0, 45],
   hsv: [0, 0.5],
   feature: [0, 2],
@@ -63,11 +58,9 @@ function preset(
 ): DiffSettings {
   return {
     match: 'nearest',
-    alignCentroids: true,
+    alignCentroids: false,
     positionPct,
     positionEnabled: true,
-    countTol: 0,
-    countEnabled: true,
     poseVectorsDeg: { enabled: true, tol: poseDeg },
     hsv: { enabled: true, tol: hsv },
     objectId: { enabled: true },
@@ -145,10 +138,6 @@ export function patchDiffSettings(prev: DiffSettings, patch: Partial<DiffSetting
     ),
     positionEnabled:
       patch.positionEnabled === undefined ? prev.positionEnabled : !!patch.positionEnabled,
-    countTol: Math.round(
-      clamp(patch.countTol ?? prev.countTol, DIFF_RANGES.countTol, prev.countTol),
-    ),
-    countEnabled: patch.countEnabled === undefined ? prev.countEnabled : !!patch.countEnabled,
     poseVectorsDeg: patchTol(prev.poseVectorsDeg, patch.poseVectorsDeg, DIFF_RANGES.poseVectorsDeg),
     hsv: patchTol(prev.hsv, patch.hsv, DIFF_RANGES.hsv),
     objectId: patch.objectId ? { enabled: !!patch.objectId.enabled } : prev.objectId,

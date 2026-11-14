@@ -4,7 +4,7 @@
  * Pure and deterministic: ties always resolve to the lower B row, nothing depends on hash
  * iteration order or sort stability, and no step builds an nA × nB structure.
  */
-import type { ChannelGraph, ObjectGraph } from '../model/types';
+import type { ChannelGraph } from '../model/types';
 import type { MatchMode } from './settings';
 
 export type Vec3 = readonly [number, number, number];
@@ -24,27 +24,51 @@ export interface ChannelMatch {
 
 const ZERO: Vec3 = [0, 0, 0];
 
+const centroids = new WeakMap<ChannelGraph, Vec3>();
+
+/** Mean of the channel's rows with all three position components finite; [0, 0, 0] if none. */
+export function channelCentroid(c: ChannelGraph): Vec3 {
+  const hit = centroids.get(c);
+  if (hit) return hit;
+  let sx = 0,
+    sy = 0,
+    sz = 0,
+    n = 0;
+  const p = c.pos;
+  for (let i = 0; i < c.n; i++) {
+    const x = p[3 * i],
+      y = p[3 * i + 1],
+      z = p[3 * i + 2];
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+    sx += x;
+    sy += y;
+    sz += z;
+    n++;
+  }
+  const out: Vec3 = n > 0 ? [sx / n, sy / n, sz / n] : ZERO;
+  centroids.set(c, out);
+  return out;
+}
+
 /**
- * Largest Euclidean distance from the graph's centroid to any row with all three position
- * components finite, over all channels; 0 for a graph with no finite rows. Unlike
- * `graphRadius` (PointCloudLayer) no minimum is substituted.
+ * Largest Euclidean distance from the channel's centroid to any row with all three position
+ * components finite; 0 for a channel with no finite rows. Unlike `graphRadius` (PointCloudLayer)
+ * no minimum is substituted.
  */
-export function diffRadius(g: ObjectGraph): number {
-  const [cx, cy, cz] = g.centroid;
+export function channelRadius(c: ChannelGraph): number {
+  const [cx, cy, cz] = channelCentroid(c);
   let r2 = 0;
-  for (const ch of g.channels) {
-    const p = ch.pos;
-    for (let i = 0; i < ch.n; i++) {
-      const x = p[3 * i],
-        y = p[3 * i + 1],
-        z = p[3 * i + 2];
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
-      const dx = x - cx,
-        dy = y - cy,
-        dz = z - cz;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      if (d2 > r2) r2 = d2;
-    }
+  const p = c.pos;
+  for (let i = 0; i < c.n; i++) {
+    const x = p[3 * i],
+      y = p[3 * i + 1],
+      z = p[3 * i + 2];
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+    const dx = x - cx,
+      dy = y - cy,
+      dz = z - cz;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 > r2) r2 = d2;
   }
   return Number.isFinite(r2) ? Math.sqrt(r2) : 0;
 }

@@ -2,26 +2,23 @@
  * Node diff panel (spec multi-file-edit-diff Phase 7b "Node diff panel", mockup 09): shown in the
  * right panel instead of the summary while `diff.selection` is set. The selected node and its
  * partner: header with previous / next node and close, the paired pose glyph (A solid, B
- * dashed, synced to the diff camera), the Property / A / B / Δ table with rows outside tolerance
+ * dashed, synced to the diff camera), the Feature / A / B / Δ table with rows outside tolerance
  * first, the "only differences" switch, and Prev / Next difference.
  *
  * Feature names are file data: rendered only as React text, looked up with `hasOwnProperty`
  * (`featureValues`) or `Map`s, keyed by `featureKey(name)`.
  */
 import { useMemo, type ReactNode } from 'react';
-import type { DiffResult, PropertyResult } from '../../diff/compare';
+import { channelFeatureNames, type DiffResult, type PropertyResult } from '../../diff/compare';
 import { featureKey, type DiffPropertyKey } from '../../diff/settings';
 import type { ResolvedSlot } from '../../diff/useDiff';
 import {
-  channelDiffOf,
-  channelFeatureNames,
   differenceList,
   differencePosition,
   partnerOf,
   stepDifference,
 } from '../../diff/viewClasses';
 import { resolveObjectId } from '../../model/hash';
-import type { ChannelGraph, ObjectGraph } from '../../model/types';
 import { useViewerStore, type DiffSelection } from '../../state/store';
 import { DisplayName } from '../../util/DisplayName';
 import { hsvToRgb, rgbToCss } from '../../viewer/colors';
@@ -33,9 +30,6 @@ import { GlyphView, type GlyphContent } from '../Inspector/GlyphView';
 import { CloseIcon } from './SlotStrip';
 import { btnSecondary, formatDelta } from './diffFormat';
 import { ArrowIcon, ChevronIcon, KindChip, SectionLabel } from './parts';
-
-const findChannel = (g: ObjectGraph, name: string): ChannelGraph | undefined =>
-  g.channels.find((c) => c.channel === name);
 
 /** One table row. `outside` undefined = not compared (shown, never highlighted). */
 interface Row {
@@ -138,16 +132,14 @@ export function NodeDiff({
   const setOnly = useViewerStore((s) => s.setDiffOnlyDifferences);
   const scene = usePrimaryDiffScene();
 
-  const channel = selection.channel;
-  const partner = partnerOf(result, selection.side, channel, selection.index);
+  const partner = partnerOf(result, selection.side, selection.index);
   const ai = selection.side === 'a' ? selection.index : partner;
   const bi = selection.side === 'b' ? selection.index : partner;
-  const chA = findChannel(a.graph, channel);
-  const chB = findChannel(b.graph, channel);
-  const cd = channelDiffOf(result, selection.side, channel);
+  const chA = a.channel;
+  const chB = b.channel;
   const own = selection.side === 'a' ? chA : chB;
   const paired = ai >= 0 && bi >= 0;
-  const kind = (chA ?? chB)?.kind ?? 'sm';
+  const sameChannel = chA.channel === chB.channel && chA.kind === chB.kind;
 
   const diffList = useMemo(() => differenceList(result), [result]);
   const pos = differencePosition(result, diffList, selection);
@@ -157,7 +149,6 @@ export function NodeDiff({
     if (next) setDiffSelection(next);
   };
   const stepNode = (dir: -1 | 1) => {
-    if (!own) return;
     const next = Math.min(own.n - 1, Math.max(0, selection.index + dir));
     if (next !== selection.index) setDiffSelection({ ...selection, index: next });
   };
@@ -166,16 +157,15 @@ export function NodeDiff({
   const rows = useMemo(() => {
     const out: Row[] = [];
     const propOf = (key: DiffPropertyKey) => result.properties.find((p) => p.key === key);
-    const compared = (key: DiffPropertyKey) => paired && cd?.changedMask.has(key) === true;
-    const deltaOf = (p: PropertyResult | undefined) =>
-      p && cd && ai >= 0 ? p.deltaA[cd.offsetA + ai] : NaN;
+    const compared = (key: DiffPropertyKey) => paired && result.changedMask.has(key);
+    const deltaOf = (p: PropertyResult | undefined) => (p && ai >= 0 ? p.deltaA[ai] : NaN);
     const outsideOf = (key: DiffPropertyKey) =>
-      compared(key) ? cd!.changedMask.get(key)![ai] === 1 : undefined;
+      compared(key) ? result.changedMask.get(key)![ai] === 1 : undefined;
 
     // node position (model frame)
     const posP = propOf('position');
-    const pa = chA && ai >= 0 ? chA.pos.subarray(3 * ai, 3 * ai + 3) : undefined;
-    const pb = chB && bi >= 0 ? chB.pos.subarray(3 * bi, 3 * bi + 3) : undefined;
+    const pa = ai >= 0 ? chA.pos.subarray(3 * ai, 3 * ai + 3) : undefined;
+    const pb = bi >= 0 ? chB.pos.subarray(3 * bi, 3 * bi + 3) : undefined;
     out.push({
       key: 'position',
       label: 'position',
@@ -190,18 +180,17 @@ export function NodeDiff({
 
     const names: string[] = [];
     for (const c of [chA, chB]) {
-      if (!c) continue;
       for (const f of channelFeatureNames(c)) if (!names.includes(f)) names.push(f);
     }
     for (const f of names) {
       const key = featureKey(f);
       const p = propOf(key);
-      const va = chA && ai >= 0 ? featureValues(chA, ai, f) : undefined;
-      const vb = chB && bi >= 0 ? featureValues(chB, bi, f) : undefined;
+      const va = ai >= 0 ? featureValues(chA, ai, f) : undefined;
+      const vb = bi >= 0 ? featureValues(chB, bi, f) : undefined;
       const isCompared = compared(key);
       if (f === 'pose_vectors' && p?.unit === '°' && (va?.length ?? vb?.length ?? 0) % 3 === 0) {
         const w = (va ?? vb)!.length;
-        const labels = poseRowLabels((chA ?? chB)!);
+        const labels = poseRowLabels(va ? chA : chB);
         for (let k = 0; k * 3 < w; k++) {
           const ra = va?.subarray(3 * k, 3 * k + 3);
           const rb = vb?.subarray(3 * k, 3 * k + 3);
@@ -227,12 +216,12 @@ export function NodeDiff({
         a: isColor(f)
           ? colorSwatch(va, f)
           : f === 'object_id'
-            ? objectIdText(a, channel, va)
+            ? objectIdText(a, chA.channel, va)
             : values(va),
         b: isColor(f)
           ? colorSwatch(vb, f)
           : f === 'object_id'
-            ? objectIdText(b, channel, vb)
+            ? objectIdText(b, chB.channel, vb)
             : values(vb),
         delta: isCompared ? deltaOf(p) : undefined,
         tol: p?.tol,
@@ -242,21 +231,21 @@ export function NodeDiff({
       });
     }
     return out;
-  }, [result, cd, chA, chB, ai, bi, paired, a, b, channel]);
+  }, [result, chA, chB, ai, bi, paired, a, b]);
 
   const outsideRows = rows.filter((r) => r.outside === true);
   const insideRows = rows.filter((r) => r.outside === false);
   const notCompared = rows.filter((r) => r.outside === undefined);
-  const mask = cd?.changedMask;
-  const mProps = paired && mask ? mask.size : 0;
-  const kProps = paired && mask ? [...mask.values()].filter((m) => m[ai] === 1).length : 0;
+  const mask = result.changedMask;
+  const mProps = paired ? mask.size : 0;
+  const kProps = paired ? [...mask.values()].filter((m) => m[ai] === 1).length : 0;
   const shownRows = onlyDifferences ? outsideRows : [...outsideRows, ...insideRows, ...notCompared];
   const hiddenRows = onlyDifferences ? [...insideRows, ...notCompared] : [];
 
   // ---- glyph ------------------------------------------------------------------------------------
   const glyph = useMemo<GlyphContent | null>(() => {
-    const ra = chA && ai >= 0 ? featureValues(chA, ai, 'pose_vectors') : undefined;
-    const rb = chB && bi >= 0 ? featureValues(chB, bi, 'pose_vectors') : undefined;
+    const ra = ai >= 0 ? featureValues(chA, ai, 'pose_vectors') : undefined;
+    const rb = bi >= 0 ? featureValues(chB, bi, 'pose_vectors') : undefined;
     const ok = (v: Float64Array | undefined) =>
       v && v.length >= 9 ? Array.from(v.subarray(0, 9)) : null;
     const ga = ok(ra);
@@ -305,9 +294,24 @@ export function NodeDiff({
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2">
                 <p className="min-w-0 truncate text-[11px] font-semibold tracking-wide text-muted uppercase">
-                  Node diff · <DisplayName value={channel} max={40} />
+                  Node diff · <DisplayName value={chA.channel} max={40} />
+                  {!sameChannel && (
+                    <>
+                      {' '}
+                      vs <DisplayName value={chB.channel} max={40} />
+                    </>
+                  )}
                 </p>
-                <KindChip kind={kind} />
+                {sameChannel ? (
+                  <KindChip kind={chA.kind} />
+                ) : (
+                  chA.kind !== chB.kind && (
+                    <>
+                      <KindChip kind={chA.kind} />
+                      <KindChip kind={chB.kind} />
+                    </>
+                  )
+                )}
               </div>
               <div className="mt-1">{nodeTitle}</div>
             </div>
@@ -317,7 +321,7 @@ export function NodeDiff({
                 className={iconBtn}
                 aria-label="Previous node of the channel"
                 title="Previous node of the channel"
-                disabled={!own || selection.index <= 0}
+                disabled={selection.index <= 0}
                 onClick={() => stepNode(-1)}
               >
                 <ChevronIcon dir="left" />
@@ -327,7 +331,7 @@ export function NodeDiff({
                 className={iconBtn}
                 aria-label="Next node of the channel"
                 title="Next node of the channel"
-                disabled={!own || selection.index >= own.n - 1}
+                disabled={selection.index >= own.n - 1}
                 onClick={() => stepNode(1)}
               >
                 <ChevronIcon dir="right" />
@@ -351,7 +355,7 @@ export function NodeDiff({
             {!paired
               ? `no partner in ${ai >= 0 ? 'B' : 'A'} within the position tolerance`
               : kProps > 0
-                ? `changed · ${kProps} of ${mProps} ${mProps === 1 ? 'property' : 'properties'} outside tolerance`
+                ? `changed · ${kProps} of ${mProps} ${mProps === 1 ? 'feature' : 'features'} outside tolerance`
                 : 'equal within tolerance'}
           </p>
         </div>
@@ -362,7 +366,7 @@ export function NodeDiff({
           </div>
         )}
 
-        <section aria-label="Node properties">
+        <section aria-label="Node features">
           <SectionLabel
             right={
               <label className="flex cursor-pointer items-center gap-2 text-[12px] text-muted">
@@ -385,17 +389,17 @@ export function NodeDiff({
               </label>
             }
           >
-            Properties
+            Features
           </SectionLabel>
           <div className="mt-2 overflow-hidden rounded-md border border-border">
             <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_64px] gap-2 bg-row-alt px-2.5 py-1.5 text-[11px] text-muted">
-              <span>Property</span>
+              <span>Feature</span>
               <span className="text-slot-a">A</span>
               <span className="text-slot-b">B</span>
               <span className="text-right">Δ / tol</span>
             </div>
             {shownRows.length === 0 && (
-              <p className="px-2.5 py-2 text-[12px] text-faint">No property outside tolerance.</p>
+              <p className="px-2.5 py-2 text-[12px] text-faint">No feature outside tolerance.</p>
             )}
             {shownRows.map((r) => {
               const out = r.outside === true;
@@ -456,7 +460,7 @@ export function NodeDiff({
           {hiddenRows.length > 0 && (
             <p className="mt-2 text-[11px] text-muted">
               {hiddenRows.length} more {insideRows.length === hiddenRows.length ? 'equal ' : ''}
-              {hiddenRows.length === 1 ? 'property' : 'properties'} hidden ·{' '}
+              {hiddenRows.length === 1 ? 'feature' : 'features'} hidden ·{' '}
               {hiddenRows.map((r) => r.label).join(', ')}
             </p>
           )}

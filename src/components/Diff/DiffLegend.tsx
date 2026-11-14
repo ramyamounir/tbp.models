@@ -1,8 +1,8 @@
 /**
  * Diff legend: floats over the bottom-left corner of a pane and lists the classes that pane
  * draws, with counts and eye toggles (Overlay: all four; a pane of one model: equal, changed and
- * that model's "only in" class). Hidden classes are shared by all panes. The property is chosen
- * in the summary's PROPERTIES list; while one is chosen the "changed" row names it.
+ * that model's "only in" class). Hidden classes are shared by all panes. The feature is chosen
+ * in the summary's FEATURES table; while one is chosen the "changed" row names it.
  *
  * In a short pane (phones, stacked panes) the legend would cover the cloud, so it starts as a
  * one-row chip of swatches and counts; tapping the chip expands it and the chevron collapses it
@@ -65,8 +65,8 @@ export function DiffLegend({
   show,
 }: {
   result: DiffResult;
-  classesA: Map<string, Uint8Array>;
-  classesB: Map<string, Uint8Array>;
+  classesA: Uint8Array;
+  classesB: Uint8Array;
   /** Classes listed, in display order. */
   show: NodeClass[];
 }) {

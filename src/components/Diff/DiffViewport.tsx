@@ -10,15 +10,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NodeClass } from '../../diff/compare';
 import type { DiffStatus, ResolvedSlot } from '../../diff/useDiff';
-import {
-  effectiveProperty,
-  partnerOf,
-  graphNodeCount,
-  sideClasses,
-  type DiffSide,
-} from '../../diff/viewClasses';
+import { channelCentroid } from '../../diff/match';
+import { effectiveProperty, partnerOf, sideClasses, type DiffSide } from '../../diff/viewClasses';
 import { useViewerStore, type DiffMode, type Tool } from '../../state/store';
 import { DisplayName } from '../../util/DisplayName';
+import { displayName } from '../../util/displayName';
 import type {
   DiffScene,
   DiffSceneGraph,
@@ -29,7 +25,7 @@ import { setDiffScene } from '../../viewer/diffSceneRegistry';
 import { DiffCanvas } from './DiffCanvas';
 import { DiffLegend } from './DiffLegend';
 import { openDiffSettings } from './diffUi';
-import { GearIcon } from './parts';
+import { GearIcon, KindChip } from './parts';
 import { CloseIcon, SlotBadge } from './SlotStrip';
 import { useSlotDrop, type Slot } from './slotDrop';
 
@@ -147,7 +143,10 @@ function ScenePane({
   );
 }
 
-/** One slot in a pane header: badge, `file · LM k › name`, node count, clear. A drop target. */
+/**
+ * One slot in a pane header: badge, `file · LM k › name`, the input channel (a dropdown when the
+ * model has several), its node count, clear. A drop target.
+ */
 function SlotHeader({ slot, resolved }: { slot: Slot; resolved: ResolvedSlot }) {
   const setSlot = useViewerStore((s) => s.setSlot);
   const { over, props } = useSlotDrop(slot);
@@ -162,21 +161,43 @@ function SlotHeader({ slot, resolved }: { slot: Slot; resolved: ResolvedSlot }) 
     >
       <SlotBadge slot={slot} />
       {/* A narrow header (phone, or two slots in one Overlay header) keeps the model name and
-          drops the file, then the LM, then the node count. */}
+          drops the file, then the node count, the kind chip and the LM. */}
       <div className="flex min-w-0 flex-1 items-baseline gap-1 overflow-hidden font-mono text-[12px] font-semibold text-text">
         <DisplayName
           value={resolved.file.name}
           max={40}
-          className="font-normal text-muted @max-[300px]:hidden"
+          className="font-normal text-muted @max-[460px]:hidden"
         />
-        <span className="shrink-0 font-normal text-faint @max-[300px]:hidden">·</span>
-        <span className="shrink-0 font-normal text-faint @max-[220px]:hidden">
+        <span className="shrink-0 font-normal text-faint @max-[460px]:hidden">·</span>
+        <span className="shrink-0 font-normal text-faint @max-[300px]:hidden">
           LM {resolved.ref.lmId} ›
         </span>
         <DisplayName value={resolved.ref.graphId} max={60} />
       </div>
-      <span className="shrink-0 font-mono text-[11px] text-faint @max-[260px]:hidden">
-        {graphNodeCount(resolved.graph).toLocaleString('en-US')} nodes
+      {resolved.graph.channels.length > 1 ? (
+        <select
+          aria-label={`Input channel of slot ${letter}`}
+          title="Input channel compared in this slot"
+          value={resolved.ref.channel}
+          onChange={(e) => setSlot(slot, { ...resolved.ref, channel: e.currentTarget.value })}
+          className="h-6 max-w-[112px] min-w-0 shrink rounded border border-border bg-panel px-1 font-mono text-[11px] text-text hover:border-accent"
+        >
+          {[...new Set(resolved.graph.channels.map((c) => c.channel))].map((name) => (
+            <option key={name} value={name}>
+              {displayName(name, { max: 40 }).text}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className="max-w-[150px] min-w-0 shrink truncate font-mono text-[11px] text-muted">
+          <DisplayName value={resolved.ref.channel} max={40} />
+        </span>
+      )}
+      <span className="@max-[340px]:hidden">
+        <KindChip kind={resolved.channel.kind} />
+      </span>
+      <span className="shrink-0 font-mono text-[11px] text-faint @max-[380px]:hidden">
+        {resolved.channel.n.toLocaleString('en-US')} nodes
       </span>
       <button
         type="button"
@@ -239,8 +260,8 @@ export function DiffViewport({ status }: { status: DiffStatus }) {
   const mode: DiffMode = both ? diff.mode : status.status === 'single' ? status.slot : 'overlay';
   const property = effectiveProperty(result, diff.property);
   const align = diff.settings.alignCentroids;
-  const graphA = a?.graph;
-  const graphB = b?.graph;
+  const channelA = a?.channel;
+  const channelB = b?.channel;
   const singleSlot = status.status === 'single' ? status.slot : undefined;
 
   const classesA = useMemo(
@@ -281,18 +302,18 @@ export function DiffViewport({ status }: { status: DiffStatus }) {
   const inputFor = useCallback(
     (spec: PaneSpec): DiffSceneInput => {
       const hidden = new Set(hiddenKey === '' ? [] : hiddenKey.split(',').map(Number));
-      const graphOf = (side: DiffSide) => (side === 'a' ? graphA : graphB);
+      const channelOf = (side: DiffSide) => (side === 'a' ? channelA : channelB);
       const graphs: DiffSceneGraph[] = [];
       spec.sides.forEach((side, k) => {
-        const g = graphOf(side);
-        if (!g) return;
+        const c = channelOf(side);
+        if (!c) return;
         // While comparing, B is not drawn in the overlay (its unmatched nodes are not known yet).
         if (!result && k > 0) return;
-        const own = g.centroid;
-        const offset = align ? own : (graphA?.centroid ?? own);
+        const own = channelCentroid(c);
+        const offset = align ? own : channelA ? channelCentroid(channelA) : own;
         const allowed = new Set<number>(spec.classes[k]);
         graphs.push({
-          graph: g,
+          channel: c,
           offset: both ? offset : own,
           classes: result ? (side === 'a' ? classesA : classesB) : undefined,
           show: (cls) => allowed.has(cls) && !hidden.has(cls),
@@ -300,7 +321,7 @@ export function DiffViewport({ status }: { status: DiffStatus }) {
       });
       const nodes: DiffSceneNode[] = [];
       if (selection && result && graphs.length > 0) {
-        const partner = partnerOf(result, selection.side, selection.channel, selection.index);
+        const partner = partnerOf(result, selection.side, selection.index);
         const other: DiffSide = selection.side === 'a' ? 'b' : 'a';
         const label = mode === 'side';
         const add = (side: DiffSide, index: number) => {
@@ -309,7 +330,6 @@ export function DiffViewport({ status }: { status: DiffStatus }) {
           if (k >= graphs.length || index < 0) return;
           nodes.push({
             graph: k,
-            channel: selection.channel,
             index,
             label: label ? `#${index}` : undefined,
           });
@@ -319,7 +339,7 @@ export function DiffViewport({ status }: { status: DiffStatus }) {
       }
       return { graphs, selection: nodes.length > 0 ? nodes : undefined };
     },
-    [graphA, graphB, both, result, classesA, classesB, align, hiddenKey, selection, mode],
+    [channelA, channelB, both, result, classesA, classesB, align, hiddenKey, selection, mode],
   );
 
   const inputs = useMemo(() => panes.map((p) => inputFor(p)), [panes, inputFor]);
@@ -367,7 +387,7 @@ export function DiffViewport({ status }: { status: DiffStatus }) {
     if (!result) return;
     const side = spec.sides[node.graph];
     if (!side) return;
-    setDiffSelection({ side, channel: node.channel, index: node.index });
+    setDiffSelection({ side, index: node.index });
   };
 
   const filledSlot = status.status === 'single' ? status.slot : undefined;
