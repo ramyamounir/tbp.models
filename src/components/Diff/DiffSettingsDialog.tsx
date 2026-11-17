@@ -23,6 +23,7 @@ import {
 } from '../../diff/settings';
 import { resolveSlot } from '../../diff/useDiff';
 import type { ChannelGraph } from '../../model/types';
+import { firstGraphId, sortedGraphIds } from '../../model/natsort';
 import { useViewerStore, type OpenFile, type SlotRef } from '../../state/store';
 import { DisplayName } from '../../util/DisplayName';
 import { formatMm } from '../Inspector/activeNode';
@@ -79,7 +80,7 @@ function pickIn(
     const lm = lms[k];
     if (!lm || lm.graphIds.length === 0) continue;
     const graphId =
-      preferGraph !== undefined && lm.graphs.has(preferGraph) ? preferGraph : lm.graphIds[0];
+      preferGraph !== undefined && lm.graphs.has(preferGraph) ? preferGraph : firstGraphId(lm)!;
     return draftFor(file, k, graphId, preferChannel);
   }
   return { fileId: file.id, lmId: Math.min(preferLm, Math.max(0, lms.length - 1)) };
@@ -159,7 +160,7 @@ function SlotCard({
                 k,
                 next && draft.graphId !== undefined && next.graphs.has(draft.graphId)
                   ? draft.graphId
-                  : next?.graphIds[0],
+                  : firstGraphId(next),
                 draft.channel,
               ),
             );
@@ -185,11 +186,12 @@ function SlotCard({
           <option value="">
             {lm && lm.graphIds.length === 0 ? 'no readable models' : '— empty —'}
           </option>
-          {lm?.graphIds.map((g) => (
-            <option key={g} value={g}>
-              {g}
-            </option>
-          ))}
+          {lm &&
+            sortedGraphIds(lm).map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
         </select>
       </div>
       <div className="flex min-w-0 items-center gap-2">

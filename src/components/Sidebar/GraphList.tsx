@@ -12,6 +12,7 @@ import { takenIds } from '../../edit/ops';
 import { findReferrers } from '../../edit/references';
 import { validateName } from '../../edit/names';
 import type { LmEntry, ModelFile, ObjectGraph, UnreadableGraph } from '../../model/types';
+import { naturalCompare } from '../../model/natsort';
 import {
   cancelRename,
   commitRename,
@@ -272,7 +273,7 @@ type Row =
   | { kind: 'r'; key: string; graphId: string; graph: ObjectGraph }
   | { kind: 'u'; key: string; u: UnreadableGraph };
 
-/** Rows of an LM in `order` (unreadable rows at their on-disk position). */
+/** Rows of an LM in natural name order (unreadable rows sorted in by their label). */
 function rowsOf(lm: LmEntry): Row[] {
   const rows: Row[] = [];
   for (const it of lm.order) {
@@ -287,7 +288,9 @@ function rowsOf(lm: LmEntry): Row[] {
       if (u) rows.push({ kind: 'u', key: unreadableRowKey(u.origin), u });
     }
   }
-  return rows;
+  const label = (r: Row) => (r.kind === 'r' ? r.graphId : r.u.graphId);
+  // Array.prototype.sort is stable: equal labels keep their on-disk order.
+  return rows.sort((a, b) => naturalCompare(label(a), label(b)));
 }
 
 /**
@@ -557,7 +560,7 @@ export function GraphList() {
             selectedRowIndex >= 0 ? `graph-row-${selectedRowIndex}` : undefined
           }
           onKeyDown={onListKeyDown}
-          className="group/list mt-2 max-h-[360px] overflow-y-auto rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="group/list mt-2 max-h-[240px] overflow-y-auto rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           {rows.map((row, i) => {
             const checked = multi.has(row.key);

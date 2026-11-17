@@ -11,9 +11,11 @@ import { isEdgeChannel } from '../model/edges';
 import type { ChannelGraph, ModelFile, ObjectGraph } from '../model/types';
 import {
   validateColorMode,
+  DEFAULT_POSE,
   validateDisplayAs,
   type ColorMode,
   type DisplayAsOptions,
+  type PoseOptions,
 } from '../state/store';
 import {
   CHILD_CATEGORICAL,
@@ -25,6 +27,7 @@ import {
 } from './colors';
 import { EdgeLayer } from './EdgeLayer';
 import { graphRadius } from './PointCloudLayer';
+import { PoseLayer, type PoseColors } from './PoseLayer';
 
 /** Overlay pink for child clouds ("All" mode; app constant, not a theme token). */
 export const CHILD_CLOUD_CSS = '#DB2777';
@@ -33,12 +36,13 @@ export const CHILD_CLOUD_MAX_POINTS = 2000;
 const CHILD_DIM_ALPHA = 0.5;
 
 /**
- * How the child object is drawn (inspector COLOR / DISPLAY tabs), already validated against the
+ * How the child object is drawn (inspector COLOR / DISPLAY / POSE tabs), already validated against the
  * child graph. `coloring` covers every channel of the child (`computeColoring` order).
  */
 export interface ChildLook {
   mode: ColorMode;
   display: DisplayAsOptions;
+  pose: PoseOptions;
   coloring: Coloring;
 }
 
@@ -53,12 +57,14 @@ export function childLook(
   mode: ColorMode,
   display: DisplayAsOptions,
   theme: ThemeColors,
+  pose: PoseOptions = DEFAULT_POSE,
 ): ChildLook {
   const m = validateColorMode(mode, child);
   const displayAs = validateDisplayAs(display.displayAs, child);
   return {
     mode: m,
     display: displayAs === display.displayAs ? display : { ...display, displayAs },
+    pose,
     coloring: computeColoring(
       model,
       child,
@@ -169,12 +175,13 @@ export function childHasPoints(child: ObjectGraph): boolean {
 const tmpColor = new THREE.Color();
 
 /**
- * Child object drawn with `look` (inspector COLOR / DISPLAY), as a group in the child's raw frame:
+ * Child object drawn with `look` (inspector COLOR / DISPLAY / POSE), as a group in the child's raw frame:
  * colored points (≤ `maxPoints`) and, for "Display as: Edges", one segment per edge node of its
  * 2D-edge channels (those nodes get no point). Points are ordered by draw priority (dimmed first,
  * top legend row last), so with depth writes off the top row is drawn over the others. Dimmed
  * nodes are blended toward `bg` (points by `CHILD_DIM_ALPHA`, edges as in the viewport). Null when
- * nothing is drawable. The caller places it with `placeChildCloud` (viewport) or
+ * nothing is drawable. With `poseColors` and `look.pose.show`, the pose vectors of the drawn
+ * channels are added. The caller places it with `placeChildCloud` (viewport) or
  * `centerChildCloud` (GlyphView) and disposes it.
  */
 export function buildChildObject(
@@ -182,6 +189,7 @@ export function buildChildObject(
   look: ChildLook,
   bg: RGB,
   maxPoints = CHILD_CLOUD_MAX_POINTS,
+  poseColors?: PoseColors,
 ): THREE.Group | null {
   const group = new THREE.Group();
   group.name = 'child-cloud';
@@ -239,6 +247,25 @@ export function buildChildObject(
     );
     points.raycast = () => {}; // overlays are never pickable
     group.add(points);
+  }
+  // Pose vectors of the drawn channels (inspector POSE tab), as in the viewport's PoseLayer;
+  // nodes hidden by the coloring get none. Only added when there is something to attach to.
+  const { pose } = look;
+  if (pose.show && poseColors && group.children.length > 0) {
+    const none: [boolean, boolean, boolean] = [false, false, false];
+    const layer = new PoseLayer(
+      { ...child, channels: src },
+      {
+        sm: pose.sm ? pose.smRows : none,
+        lm: pose.lm ? pose.lmRows : none,
+        smDefinedOnly: pose.smDefinedOnly,
+        length: (pose.lengthPct / 100) * graphRadius(child),
+        widthPx: pose.widthPx,
+      },
+      poseColors,
+    );
+    layer.setHidden((name) => coloring[src.findIndex((c) => c.channel === name)]?.hidden);
+    group.add(layer.group);
   }
   return group.children.length > 0 ? group : null;
 }

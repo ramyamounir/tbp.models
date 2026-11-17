@@ -302,7 +302,10 @@ function ErrorBox({ message, detail }: { message: string; detail?: string }) {
 export function ExportDialog({ fileId, onClose }: { fileId: string; onClose(): void }) {
   const file = useViewerStore((s) => s.files.find((f) => f.id === fileId));
   const [stem, setStem] = useState(() =>
-    sanitizeStem(`${stripPt(file?.file.name ?? 'model')}_edited`),
+    // A name given in the app is the suggestion as it is; an untouched one gets "_edited".
+    sanitizeStem(
+      file?.renamed ? stripPt(file.name) : `${stripPt(file?.file.name ?? 'model')}_edited`,
+    ),
   );
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   /** Bumped on every start / cancel / unmount; an export task acts only while its run is current. */

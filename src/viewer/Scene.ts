@@ -8,7 +8,7 @@
  *       └── modelFrameGroup (position = −centroid when display.center; never rotated)
  *           ├── Points per channel (raw pos)
  *           ├── edges per 2D-edge channel ("Display as: Edges", raw pos)
- *           ├── normals (optional, raw pos)
+ *           ├── pose vectors (optional, raw pos)
  *           ├── selection ring + pose glyph (raw node pos)
  *           └── overlayGroup (identity; Phase 4 overlays)
  *
@@ -16,7 +16,13 @@
  */
 import * as THREE from 'three';
 import type { ChannelGraph, ObjectGraph } from '../model/types';
-import { getGraph, useViewerStore, type Tool, type ViewerState } from '../state/store';
+import {
+  getGraph,
+  useViewerStore,
+  type PoseOptions,
+  type Tool,
+  type ViewerState,
+} from '../state/store';
 import { readToken } from '../theme/readToken';
 import { displayName } from '../util/displayName';
 import {
@@ -28,7 +34,7 @@ import {
 } from './colors';
 import { EdgeLayer } from './EdgeLayer';
 import { buildLmTriad, buildRingMarker, buildSmGlyph, disposeObject } from './Glyphs';
-import { NormalsLayer } from './NormalsLayer';
+import { PoseLayer, readPoseColors } from './PoseLayer';
 import { Picker, type PickHit } from './Picker';
 import { isEdgeChannel } from '../model/edges';
 import { graphRadius, PointCloudLayer } from './PointCloudLayer';
@@ -103,7 +109,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
   let graph: ObjectGraph | undefined;
   let layers: PointCloudLayer[] = [];
   let edges: EdgeLayer[] = [];
-  let normals: NormalsLayer | null = null;
+  let poseLayer: PoseLayer | null = null;
   let R = 0.01;
   let themeColors: ThemeColors = readThemeColors();
   let coloring: Coloring | null = null;
@@ -135,13 +141,13 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
       const e = edges.find((x) => x.channel === layer.channel);
       if (e) e.setColors(cc.colors, cc.dimmed, cc.hidden, dimChannel, bg);
     });
-    normals?.setDimmed(s.display.dimOthers ? sel?.channel : undefined);
-    applyNormalsHidden();
+    poseLayer?.setDimmed(s.display.dimOthers ? sel?.channel : undefined);
+    applyPoseHidden();
   }
 
-  function applyNormalsHidden() {
+  function applyPoseHidden() {
     const c = coloring;
-    normals?.setHidden((ch) => c?.channels.find((cc) => cc.channel === ch)?.hidden);
+    poseLayer?.setHidden((ch) => c?.channels.find((cc) => cc.channel === ch)?.hidden);
   }
 
   function applyPointSize() {
@@ -187,15 +193,30 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     objectGroup.updateMatrixWorld(true);
   }
 
-  function rebuildNormals() {
-    normals?.dispose();
-    normals = null;
-    if (!graph || !st().display.showNormals) return;
-    normals = new NormalsLayer(graph, R, readToken('--glyph-normal'));
-    modelFrameGroup.add(normals.group);
+  /** Everything of the pose options that the segment geometry depends on (not the width). */
+  const poseGeometryKey = (o: PoseOptions) => JSON.stringify({ ...o, widthPx: 0 });
+
+  function rebuildPose() {
+    poseLayer?.dispose();
+    poseLayer = null;
+    const pose = st().pose;
+    if (!graph || !pose.show) return;
+    const none: [boolean, boolean, boolean] = [false, false, false];
+    poseLayer = new PoseLayer(
+      graph,
+      {
+        sm: pose.sm ? pose.smRows : none,
+        lm: pose.lm ? pose.lmRows : none,
+        smDefinedOnly: pose.smDefinedOnly,
+        length: (pose.lengthPct / 100) * R,
+        widthPx: pose.widthPx,
+      },
+      readPoseColors(),
+    );
+    modelFrameGroup.add(poseLayer.group);
     const s = st();
-    normals.setDimmed(s.display.dimOthers ? s.selection?.channel : undefined);
-    applyNormalsHidden();
+    poseLayer.setDimmed(s.display.dimOthers ? s.selection?.channel : undefined);
+    applyPoseHidden();
   }
 
   function rebuildSelection() {
@@ -252,8 +273,8 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     layers = [];
     for (const e of edges) e.dispose();
     edges = [];
-    normals?.dispose();
-    normals = null;
+    poseLayer?.dispose();
+    poseLayer = null;
     coloring = null;
     hover = null;
     picker.clearHover();
@@ -271,7 +292,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     }
     applyCenter();
     rebuildEdges(); // also applies point size and colors
-    rebuildNormals();
+    rebuildPose();
     rebuildSelection();
     if (s.loadGen !== lastLoadGen) {
       lastLoadGen = s.loadGen;
@@ -409,7 +430,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
     themeColors = readThemeColors();
     applyBackground();
     recolor();
-    normals?.setColor(readToken('--glyph-normal'));
+    poseLayer?.setColors(readPoseColors());
     rebuildSelection();
     rebuildHover();
   }
@@ -433,7 +454,12 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
       ) {
         recolor();
       }
-      if (s.display.showNormals !== p.display.showNormals) rebuildNormals();
+      if (s.pose !== p.pose) {
+        // A width-only change needs no new geometry.
+        if (poseLayer && poseGeometryKey(s.pose) === poseGeometryKey(p.pose))
+          poseLayer.setWidth(s.pose.widthPx);
+        else rebuildPose();
+      }
       if (
         s.display.displayAs !== p.display.displayAs ||
         s.display.edgeLengthPct !== p.display.edgeLengthPct
@@ -615,7 +641,7 @@ export function createViewerScene(container: HTMLElement): ViewerScene {
       layers = [];
       for (const e of edges) e.dispose();
       edges = [];
-      normals?.dispose();
+      poseLayer?.dispose();
       if (selectionGroup) disposeObject(selectionGroup);
       if (hoverMarker) disposeObject(hoverMarker);
       for (const child of [...overlayGroup.children]) disposeObject(child);

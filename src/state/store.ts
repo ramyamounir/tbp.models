@@ -10,6 +10,8 @@ import {
 import { mapAddress, mapLm, type EditRecord } from '../edit/types';
 import { graphHasEdgeChannel } from '../model/edges';
 import type { ModelFile, ObjectGraph } from '../model/types';
+import { firstGraphId, sortedGraphIds } from '../model/natsort';
+import { sanitizeDisplay } from '../util/displayName';
 import { pruneSourceFiles, type SourceFile } from './sourceFiles';
 import {
   isTheme,
@@ -30,7 +32,6 @@ export type DisplayAs = 'points' | 'edges';
 
 export interface DisplayOptions {
   pointSize: number;
-  showNormals: boolean;
   center: boolean;
   dimOthers: boolean;
   displayAs: DisplayAs;
@@ -39,14 +40,35 @@ export interface DisplayOptions {
   /** Edge segment width in CSS px. */
   edgeWidthPx: number;
 }
+/** Which of the three `pose_vectors` rows are drawn. */
+export type PoseRows = [boolean, boolean, boolean];
+/**
+ * Pose vectors drawn on every node (sidebar POSE tab). `sm` / `lm` switch a channel kind on or
+ * off without losing its row choice.
+ */
+export interface PoseOptions {
+  show: boolean;
+  sm: boolean;
+  lm: boolean;
+  /** SM rows: surface normal, curvature direction 1, curvature direction 2. */
+  smRows: PoseRows;
+  /** Hide SM curvature directions where `pose_fully_defined` is not set (they are arbitrary there). */
+  smDefinedOnly: boolean;
+  /** LM rows: the child object's x, y, z axes. */
+  lmRows: PoseRows;
+  /** Vector length as a percentage of the object bounding-sphere radius `R`. */
+  lengthPct: number;
+  /** Vector line width in CSS px. */
+  widthPx: number;
+}
 /** The "Display as" settings, shared by the parent graph and the inspector's child object. */
 export type DisplayAsOptions = Pick<
   DisplayOptions,
   'displayAs' | 'pointSize' | 'edgeLengthPct' | 'edgeWidthPx'
 >;
 export type Tool = 'orbit' | 'pan' | 'pick' | 'rotate';
-/** Inspector tabs of an LM node; COLOR and DISPLAY style the child object (preview and overlay). */
-export type InspectorTab = 'features' | 'color' | 'display';
+/** Inspector tabs of an LM node; COLOR, DISPLAY and POSE style the child object (preview and overlay). */
+export type InspectorTab = 'features' | 'color' | 'display' | 'pose';
 
 /** Legends whose rows the user can reorder (color priority) and hide: object_id and channel source. */
 export type LegendKind = 'categorical' | 'channel';
@@ -62,7 +84,9 @@ export type Theme = 'light' | 'dark' | 'system';
 export interface OpenFile {
   id: string; // crypto.randomUUID()
   file: File; // handle, re-read at export
-  name: string; // display name, "model.pt (2)" for a repeated name
+  name: string; // display name, "model.pt (2)" for a repeated name, or the name given in the app
+  /** The user named this file in the app (`renameFile`); export then suggests that name. */
+  renamed?: true;
   byteLength: number;
   view: ModelFile; // current state after edits
   /** Remembered selection; the store's lmId / graphId are authoritative while the file is active. */
@@ -90,10 +114,13 @@ export function unsavedRecords(f: OpenFile): { records: EditRecord[]; reverted: 
   return { records: [], reverted: f.redo.slice(-n).reverse() };
 }
 
+/** Longest display name `renameFile` keeps (code points). */
+export const FILE_NAME_MAX = 64;
+
 /** `name`, or `name (n)` with the smallest free n >= 2 when another open file has that name. */
 export function uniqueDisplayName(name: string, files: readonly OpenFile[]): string {
-  if (!files.some((f) => f.file.name === name)) return name;
   const taken = new Set(files.map((f) => f.name));
+  if (!taken.has(name)) return name;
   let n = 2;
   while (taken.has(`${name} (${n})`)) n++;
   return `${name} (${n})`;
@@ -102,7 +129,7 @@ export function uniqueDisplayName(name: string, files: readonly OpenFile[]): str
 /** First LM with >= 1 readable graph and its first graph id (graphId undefined if none). */
 export function initialSelection(model: ModelFile): { lmId: number; graphId: string | undefined } {
   const lm = model.lms.find((l) => l.graphIds.length > 0);
-  return lm ? { lmId: lm.lmId, graphId: lm.graphIds[0] } : { lmId: 0, graphId: undefined };
+  return lm ? { lmId: lm.lmId, graphId: firstGraphId(lm) } : { lmId: 0, graphId: undefined };
 }
 
 /** A new open-file id (crypto.randomUUID, with a fallback for non-secure contexts). */
@@ -221,6 +248,7 @@ export interface ViewerState {
   matchRadiusPct: number;
   colorMode: ColorMode;
   display: DisplayOptions;
+  pose: PoseOptions;
   objectRotationDeg: [number, number, number]; // Euler XYZ, degrees
   legend: LegendPrefsByKind; // kept across graph changes (row keys are channel names / ids); reset by setModel
   tool: Tool;
@@ -234,6 +262,8 @@ export interface ViewerState {
    */
   childColorMode: ColorMode;
   childDisplay: DisplayAsOptions;
+  /** Pose vectors on the child object's nodes (preview and overlay). */
+  childPose: PoseOptions;
   theme: Theme; // user choice; single owner
   systemPrefersDark: boolean; // mirrors matchMedia('(prefers-color-scheme: dark)'); written only by ThemeProvider
   resolvedTheme: 'light' | 'dark'; // derived = resolveTheme(theme, systemPrefersDark); never set directly
@@ -247,6 +277,12 @@ export interface ViewerState {
   activateFile(id: string): void;
   /** Closes without confirmation (the UI goes through `requestCloseFile`). */
   closeFile(id: string): void;
+  /**
+   * Gives an open file a display name of the user's choice (in the app only: the file on disk
+   * is untouched). The name is sanitized, trimmed and made unique among the open files; an
+   * empty name is ignored. Not an edit: no undo record, no unsaved mark.
+   */
+  renameFile(id: string, name: string): void;
   /**
    * Runs `op` against the file's current view, one at a time per file (Phase 2 "Per-file edit
    * queue"); resolves false if nothing was applied. Rejects when `op` throws.
@@ -273,6 +309,8 @@ export interface ViewerState {
   setSelection(selection: ViewerState['selection'], opts?: { keepOverlay?: boolean }): void;
   setColorMode(mode: ColorMode): void;
   setDisplay(patch: Partial<DisplayOptions>): void;
+  /** Patches the pose-vector options (`lengthPct` and `widthPx` are clamped). */
+  setPose(patch: Partial<PoseOptions>): void;
   setRotation(deg: [number, number, number]): void;
   /** `keys` = the legend rows in their new order (keys not in it keep their place after them). */
   setLegendOrder(kind: LegendKind, keys: string[]): void;
@@ -286,6 +324,7 @@ export interface ViewerState {
   setInspectorTab(tab: InspectorTab): void;
   setChildColorMode(mode: ColorMode): void;
   setChildDisplay(patch: Partial<DisplayAsOptions>): void;
+  setChildPose(patch: Partial<PoseOptions>): void;
   setTheme(theme: Theme): void;
   setSystemPrefersDark(dark: boolean): void;
 
@@ -308,9 +347,32 @@ export interface ViewerState {
   setDiffOnlyDifferences(on: boolean): void;
 }
 
+export const POSE_LENGTH_MIN = 1;
+export const POSE_LENGTH_MAX = 30;
+export const POSE_WIDTH_MIN = 1;
+export const POSE_WIDTH_MAX = 8;
+export const DEFAULT_POSE: PoseOptions = {
+  show: false,
+  sm: true,
+  lm: true,
+  // Only the SM surface normal to start with; every other vector is opt-in.
+  smRows: [true, false, false],
+  smDefinedOnly: false,
+  lmRows: [false, false, false],
+  lengthPct: 5,
+  widthPx: 1,
+};
+
+/** `prev` with `patch` applied; length and width are clamped (a non-number keeps the old value). */
+function patchPose(prev: PoseOptions, patch: Partial<PoseOptions>): PoseOptions {
+  const pose = { ...prev, ...patch };
+  pose.lengthPct = clampNum(pose.lengthPct, POSE_LENGTH_MIN, POSE_LENGTH_MAX, prev.lengthPct);
+  pose.widthPx = clampNum(pose.widthPx, POSE_WIDTH_MIN, POSE_WIDTH_MAX, prev.widthPx);
+  return pose;
+}
+
 export const DEFAULT_DISPLAY: DisplayOptions = {
   pointSize: 3,
-  showNormals: false,
   center: true,
   dimOthers: false,
   displayAs: 'points',
@@ -443,6 +505,7 @@ function showFile(
   | 'legend'
   | 'childColorMode'
   | 'childDisplay'
+  | 'childPose'
   | 'selection'
   | 'activeTab'
   | 'overlayChild'
@@ -467,6 +530,7 @@ function showFile(
     legend: emptyLegendPrefs(),
     childColorMode: { kind: 'all' },
     childDisplay: { ...DEFAULT_CHILD_DISPLAY },
+    childPose: { ...DEFAULT_POSE },
     ...graphChangeResets(model, lmId, graphId, s.colorMode, s.display),
   };
 }
@@ -521,8 +585,9 @@ export function repairSelection(
   if (cand && lms[cand.lmId]?.graphs.has(cand.graphId))
     return { lmId: cand.lmId, graphId: cand.graphId };
   const beforeLm = (direction === 'forward' ? rec.before : rec.after).lms[sel.lmId];
-  const idx = beforeLm ? beforeLm.graphIds.indexOf(sel.graphId) : -1;
-  const ids = lms[newLm]?.graphIds ?? [];
+  // Same row of the (naturally sorted) list, else the last one.
+  const idx = beforeLm ? sortedGraphIds(beforeLm).indexOf(sel.graphId) : -1;
+  const ids = lms[newLm] ? sortedGraphIds(lms[newLm]) : [];
   const graphId = idx >= 0 && idx < ids.length ? ids[idx] : ids[ids.length - 1];
   return { lmId: newLm, graphId };
 }
@@ -601,6 +666,7 @@ export const useViewerStore = create<ViewerState>()(
       matchRadiusPct: DEFAULT_MATCH_RADIUS_PCT,
       colorMode: { kind: 'all' },
       display: { ...DEFAULT_DISPLAY },
+      pose: { ...DEFAULT_POSE },
       objectRotationDeg: [0, 0, 0],
       legend: emptyLegendPrefs(),
       tool: 'orbit',
@@ -609,6 +675,7 @@ export const useViewerStore = create<ViewerState>()(
       inspectorTab: 'features',
       childColorMode: { kind: 'all' },
       childDisplay: { ...DEFAULT_CHILD_DISPLAY },
+      childPose: { ...DEFAULT_POSE },
       ...initialTheme(),
       diff: initialDiffState(),
 
@@ -646,6 +713,26 @@ export const useViewerStore = create<ViewerState>()(
           const target = files.find((f) => f.id === id);
           if (!target) return s;
           return { files, ...showFile(s, target) };
+        });
+      },
+
+      renameFile(id, raw) {
+        set((s) => {
+          const file = s.files.find((f) => f.id === id);
+          if (!file) return s;
+          const clean = Array.from(sanitizeDisplay(raw).trim()).slice(0, FILE_NAME_MAX).join('');
+          if (clean === '' || clean === file.name) return s;
+          const name = uniqueDisplayName(
+            clean,
+            s.files.filter((f) => f.id !== id),
+          );
+          const files = s.files.map((f) =>
+            f.id === id ? { ...f, name, renamed: true as const } : f,
+          );
+          const sourceFiles = new Map(s.sourceFiles);
+          const sf = sourceFiles.get(id);
+          if (sf) sourceFiles.set(id, { ...sf, name });
+          return { files, sourceFiles };
         });
       },
 
@@ -767,6 +854,14 @@ export const useViewerStore = create<ViewerState>()(
         set({ colorMode });
       },
 
+      setPose(patch) {
+        set((s) => ({ pose: patchPose(s.pose, patch) }));
+      },
+
+      setChildPose(patch) {
+        set((s) => ({ childPose: patchPose(s.childPose, patch) }));
+      },
+
       setDisplay(patch) {
         set((s) => {
           const display = patchDisplayAs(s.display, patch);
@@ -832,8 +927,7 @@ export const useViewerStore = create<ViewerState>()(
       },
 
       setInspectorTab(inspectorTab) {
-        if (inspectorTab !== 'features' && inspectorTab !== 'color' && inspectorTab !== 'display')
-          return;
+        if (!['features', 'color', 'display', 'pose'].includes(inspectorTab)) return;
         set({ inspectorTab });
       },
 

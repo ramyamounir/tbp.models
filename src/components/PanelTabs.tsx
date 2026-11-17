@@ -9,8 +9,8 @@ export interface PanelTab<T extends string> {
 }
 
 /**
- * Underlined uppercase tab strip used by the sidebar (COLOR / DISPLAY) and the inspector
- * (FEATURES / COLOR / DISPLAY). Arrow keys, Home and End move between enabled tabs. The panels
+ * Underlined uppercase tab strip used by the sidebar (COLOR / DISPLAY / POSE) and the inspector
+ * (FEATURES / COLOR / DISPLAY / POSE). Arrow keys, Home and End move between enabled tabs. The panels
  * are labelled `${idPrefix}-panel-${id}` / `${idPrefix}-tab-${id}` (see `TabPanel`).
  */
 export function PanelTabs<T extends string>({

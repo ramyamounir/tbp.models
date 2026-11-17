@@ -12,7 +12,7 @@ import type { OpenFile } from './store';
 
 export interface SourceFile {
   file: File;
-  /** OpenFile.name at open time ("model.pt (2)"). */
+  /** OpenFile.name ("model.pt (2)", or the name given in the app); follows `renameFile`. */
   name: string;
 }
 

@@ -1,3 +1,4 @@
+import { firstGraphId, sortedGraphIds } from '../model/natsort';
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { getGraph, useViewerStore } from '../state/store';
 import { DisplayName } from '../util/DisplayName';
@@ -149,9 +150,9 @@ export function Breadcrumb() {
     label: `LM ${l.lmId}`,
     aside: `${l.graphIds.length} ${l.graphIds.length === 1 ? 'graph' : 'graphs'}`,
     current: l.lmId === lmId,
-    onSelect: () => selectGraph(l.lmId, l.graphIds[0]),
+    onSelect: () => selectGraph(l.lmId, firstGraphId(l)),
   }));
-  const graphItems: PickerItem[] = (lm?.graphIds ?? []).map((id, i) => {
+  const graphItems: PickerItem[] = (lm ? sortedGraphIds(lm) : []).map((id, i) => {
     const g = lm.graphs.get(id);
     return {
       key: `g${i}`,

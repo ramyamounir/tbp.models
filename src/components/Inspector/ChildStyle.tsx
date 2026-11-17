@@ -1,13 +1,13 @@
 /**
- * Inspector COLOR / DISPLAY tabs for the child object of an LM node: the tab strip, the options
+ * Inspector COLOR / DISPLAY / POSE tabs for the child object of an LM node: the tab strip, the options
  * (the sidebar's, offered for the child graph) and the read-only child legend strip shown in the
  * child preview. The settings live in the store (`childColorMode` / `childDisplay`).
  */
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import type { ObjectGraph } from '../../model/types';
 import { useViewerStore, type InspectorTab } from '../../state/store';
 import { DisplayName } from '../../util/DisplayName';
-import type { ChildLook } from '../../viewer/ChildOverlay';
+import { childChannelsFor, type ChildLook } from '../../viewer/ChildOverlay';
 import {
   objectIdLabel,
   rgbToCss,
@@ -18,11 +18,12 @@ import {
 import { PanelTabs, TabPanel, type PanelTab } from '../PanelTabs';
 import { ColorModeOptions } from '../Sidebar/ColorModePanel';
 import { DisplayAsChoices } from '../Sidebar/DisplayAsPanel';
+import { PoseChoices } from '../Sidebar/PosePanel';
 
 const TABS_ID = 'inspector';
 
 /**
- * FEATURES | COLOR | DISPLAY; `tab` comes from `useInspectorTab`. COLOR and DISPLAY are disabled
+ * FEATURES | COLOR | DISPLAY | POSE; `tab` comes from `useInspectorTab`. The last three are disabled
  * (with `disabledTitle` as tooltip) while there is no child object to style.
  */
 export function InspectorTabStrip({
@@ -38,6 +39,7 @@ export function InspectorTabStrip({
     { id: 'features', label: 'Features' },
     { id: 'color', label: 'Color', ...off },
     { id: 'display', label: 'Display', ...off },
+    { id: 'pose', label: 'Pose', ...off },
   ];
   return (
     <PanelTabs<InspectorTab>
@@ -58,18 +60,25 @@ export function InspectorTabPanel({ tab, children }: { tab: InspectorTab; childr
   );
 }
 
-/** COLOR or DISPLAY options for the child object. */
+/** COLOR, DISPLAY or POSE options for the child object. */
 export function ChildStylePanel({
   tab,
   child,
   look,
 }: {
-  tab: 'color' | 'display';
+  tab: 'color' | 'display' | 'pose';
   child: ObjectGraph;
   look: ChildLook;
 }) {
   const setMode = useViewerStore((s) => s.setChildColorMode);
   const setDisplay = useViewerStore((s) => s.setChildDisplay);
+  const setPose = useViewerStore((s) => s.setChildPose);
+  // Pose vectors are drawn on the channels the color mode draws (the SM channels, unless the
+  // mode colors LM channels too), so the counts cover those only.
+  const drawn = useMemo(
+    () => ({ ...child, channels: childChannelsFor(child, look.mode) }),
+    [child, look.mode],
+  );
   return (
     <div>
       <p className="mb-1.5 flex min-w-0 items-center gap-1 text-[11px] text-faint">
@@ -85,6 +94,8 @@ export function ChildStylePanel({
           name="child-color-mode"
           ariaLabel="Color child points by"
         />
+      ) : tab === 'pose' ? (
+        <PoseChoices graph={drawn} pose={look.pose} onChange={setPose} />
       ) : (
         <DisplayAsChoices
           graph={child}

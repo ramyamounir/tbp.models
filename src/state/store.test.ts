@@ -101,7 +101,6 @@ describe('store defaults', () => {
     expect(s.display).toEqual(DEFAULT_DISPLAY);
     expect(s.display).toEqual({
       pointSize: 3,
-      showNormals: false,
       center: true,
       dimOthers: false,
       displayAs: 'points',
@@ -244,10 +243,10 @@ describe('selection, tabs, display, theme', () => {
     expect(useViewerStore.getState().display.pointSize).toBe(1);
     s.setDisplay({ pointSize: NaN });
     expect(useViewerStore.getState().display.pointSize).toBe(1);
-    s.setDisplay({ showNormals: true });
+    s.setDisplay({ center: false });
     expect(useViewerStore.getState().display).toMatchObject({
       pointSize: 1,
-      showNormals: true,
+      center: false,
     });
     s.setDisplay({ edgeLengthPct: 100 });
     expect(useViewerStore.getState().display.edgeLengthPct).toBe(30);
@@ -344,5 +343,74 @@ describe('child settings and inspector tab', () => {
     st = useViewerStore.getState();
     expect(st.childColorMode).toEqual({ kind: 'all' });
     expect(st.childDisplay).toEqual(DEFAULT_CHILD_DISPLAY);
+  });
+});
+
+describe('renameFile', () => {
+  const names = () => useViewerStore.getState().files.map((f) => f.name);
+
+  it('renames in the app only and keeps names unique', () => {
+    openModel(0, 'a');
+    openModel(0, 'a');
+    expect(names()).toEqual(['model.pt', 'model.pt (2)']);
+    const [first, second] = useViewerStore.getState().files;
+    useViewerStore.getState().renameFile(second.id, '  baseline\u202E ');
+    expect(names()).toEqual(['model.pt', 'baseline']);
+    let st = useViewerStore.getState();
+    expect(st.files[1].renamed).toBe(true);
+    expect(st.files[1].file.name).toBe('model.pt');
+    expect(st.sourceFiles.get(second.id)?.name).toBe('baseline');
+    expect(st.files[1].undo).toEqual([]);
+    // A name another open file has gets a suffix; an empty name is ignored.
+    st.renameFile(first.id, 'baseline');
+    st.renameFile(second.id, '   ');
+    expect(names()).toEqual(['baseline (2)', 'baseline']);
+    // The on-disk name is free again for the next file.
+    openModel(0, 'a');
+    st = useViewerStore.getState();
+    expect(names()).toEqual(['baseline (2)', 'baseline', 'model.pt']);
+    expect(st.files[2].renamed).toBeUndefined();
+  });
+});
+
+describe('pose options', () => {
+  it('are off by default and clamp the length', () => {
+    const s = useViewerStore.getState();
+    expect(s.pose).toEqual({
+      show: false,
+      sm: true,
+      lm: true,
+      smRows: [true, false, false],
+      smDefinedOnly: false,
+      lmRows: [false, false, false],
+      lengthPct: 5,
+      widthPx: 1,
+    });
+    s.setPose({ show: true, lengthPct: 500, smRows: [true, true, false] });
+    expect(useViewerStore.getState().pose).toMatchObject({
+      show: true,
+      lengthPct: 30,
+      smRows: [true, true, false],
+    });
+    s.setPose({ widthPx: 99 });
+    expect(useViewerStore.getState().pose.widthPx).toBe(8);
+    s.setPose({ lengthPct: NaN });
+    expect(useViewerStore.getState().pose.lengthPct).toBe(30);
+  });
+});
+
+describe('child pose options', () => {
+  it('are separate from the displayed graph and reset with the file', () => {
+    openModel(0, 'a');
+    const s = useViewerStore.getState();
+    s.setInspectorTab('pose');
+    s.setChildPose({ show: true, widthPx: 99 });
+    let st = useViewerStore.getState();
+    expect(st.inspectorTab).toBe('pose');
+    expect(st.childPose).toMatchObject({ show: true, widthPx: 8 });
+    expect(st.pose.show).toBe(false);
+    openModel(0, 'a');
+    st = useViewerStore.getState();
+    expect(st.childPose.show).toBe(false);
   });
 });

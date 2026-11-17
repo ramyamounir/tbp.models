@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { requestCloseFile } from '../../state/closeRequest';
 import { editFailed } from '../../state/editUi';
 import {
@@ -8,7 +8,7 @@ import {
   type GraphDragPayload,
 } from '../../state/graphDrag';
 import { MEMORY_WARN_BYTES, loadedBytes } from '../../state/memory';
-import { unsavedCount, useViewerStore, type OpenFile } from '../../state/store';
+import { FILE_NAME_MAX, unsavedCount, useViewerStore, type OpenFile } from '../../state/store';
 import { formatBytes } from '../../util/bytes';
 import { DisplayName } from '../../util/DisplayName';
 import { CopyToMenu, runCopy } from './CopyToMenu';
@@ -33,12 +33,83 @@ function FileIcon() {
   );
 }
 
+function PencilIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+    </svg>
+  );
+}
+
+/**
+ * Inline name field of a file row. The name exists only in the app (the file on disk keeps its
+ * name); `Enter` or leaving the field saves, `Escape` cancels.
+ */
+function FileNameField({ file, onDone }: { file: OpenFile; onDone(): void }) {
+  const renameFile = useViewerStore((s) => s.renameFile);
+  const [value, setValue] = useState(file.name);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const settled = useRef(false);
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+  const finish = (save: boolean) => {
+    if (settled.current) return;
+    settled.current = true;
+    if (save) renameFile(file.id, value);
+    onDone();
+  };
+  return (
+    <input
+      ref={inputRef}
+      value={value}
+      maxLength={FILE_NAME_MAX}
+      spellCheck={false}
+      aria-label={`Rename ${file.name}`}
+      onChange={(e) => setValue(e.currentTarget.value)}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onBlur={() => finish(true)}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          finish(true);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          finish(false);
+        }
+      }}
+      className="-mx-1 h-6 min-w-0 flex-1 rounded border border-accent bg-panel px-1 font-mono text-[12px] text-text outline-none"
+    />
+  );
+}
+
 const graphCount = (f: OpenFile) =>
   f.view.lms.reduce((n, lm) => n + lm.graphIds.length + lm.unreadable.length, 0);
 
 function FileRow({ file, active }: { file: OpenFile; active: boolean }) {
   const activateFile = useViewerStore((s) => s.activateFile);
   const [dropOver, setDropOver] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const rowRef = useRef<HTMLLIElement>(null);
+  /** Closes the name field and puts focus back on the row (the field is gone). */
+  const endRename = () => {
+    setRenaming(false);
+    rowRef.current?.focus();
+  };
   // Drop whose LM index this file lacks: the "Copy to…" chooser restricted to this file.
   const [chooser, setChooser] = useState<{ payload: GraphDragPayload; anchor: HTMLElement } | null>(
     null,
@@ -78,11 +149,15 @@ function FileRow({ file, active }: { file: OpenFile; active: boolean }) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       activateFile(file.id);
+    } else if (e.key === 'F2') {
+      e.preventDefault();
+      setRenaming(true);
     }
   };
   return (
     <>
       <li
+        ref={rowRef}
         role="option"
         aria-selected={active}
         tabIndex={0}
@@ -101,11 +176,24 @@ function FileRow({ file, active }: { file: OpenFile; active: boolean }) {
         <span className={`shrink-0 ${active ? 'text-accent' : 'text-muted'}`}>
           <FileIcon />
         </span>
-        <DisplayName
-          value={file.name}
-          max={64}
-          className={`font-mono text-[12px] ${active ? 'font-semibold text-accent' : 'text-text'}`}
-        />
+        {renaming ? (
+          <FileNameField file={file} onDone={endRename} />
+        ) : (
+          <span
+            className="flex min-w-0"
+            title="Double-click to rename (in the app only)"
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setRenaming(true);
+            }}
+          >
+            <DisplayName
+              value={file.name}
+              max={FILE_NAME_MAX}
+              className={`font-mono text-[12px] ${active ? 'font-semibold text-accent' : 'text-text'}`}
+            />
+          </span>
+        )}
         {dirty > 0 && (
           <span
             className="h-1.5 w-1.5 shrink-0 rounded-full bg-diff-changed"
@@ -113,9 +201,27 @@ function FileRow({ file, active }: { file: OpenFile; active: boolean }) {
             aria-label={`${dirty} unsaved ${dirty === 1 ? 'edit' : 'edits'}`}
           />
         )}
-        <span className="ml-auto shrink-0 text-[11px] text-faint" title={`${count} graphs`}>
+        {!renaming && <span className="flex-1" aria-hidden="true" />}
+        <span
+          className={`shrink-0 text-[11px] text-faint ${renaming ? '' : 'group-focus-within:hidden group-hover:hidden'}`}
+          title={`${count} graphs`}
+        >
           {count.toLocaleString('en-US')}
         </span>
+        {!renaming && (
+          <button
+            type="button"
+            aria-label={`Rename ${file.name}`}
+            title="Rename (in the app only) · F2"
+            onClick={(e) => {
+              e.stopPropagation();
+              setRenaming(true);
+            }}
+            className="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-muted group-focus-within:flex group-hover:flex hover:bg-border hover:text-text [@media(hover:none)]:flex"
+          >
+            <PencilIcon />
+          </button>
+        )}
         <button
           type="button"
           aria-label={`Close ${file.name}`}
@@ -160,7 +266,7 @@ function MemoryWarning() {
 
 /**
  * The sidebar "Open files" list (spec multi-file-edit-diff Phase 1 "Components"): one row per
- * open file (name, unsaved dot, graph count, close), the "+ Open another model.pt" row that
+ * open file (name, unsaved dot, graph count, rename, close), the "+ Open another model.pt" row that
  * opens the shared file picker, load progress / errors and the memory warning.
  */
 export function OpenFilesList({ onOpenModel }: { onOpenModel?: () => void }) {

@@ -66,7 +66,7 @@ export function RotationPanel() {
         );
       })}
       <p className="mt-1 text-[11px] text-faint">
-        Points, normals &amp; child poses rotate together
+        Points, pose vectors &amp; child poses rotate together
       </p>
     </section>
   );

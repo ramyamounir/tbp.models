@@ -27,13 +27,21 @@ receives model data.
      tangent (the second `pose_vectors` row), the other nodes stay dots; edge length (% of the
      object radius) and edge width (px) are adjustable. Available when the graph has an SM channel
      with `edge_strength` / `coherence`.
-     Below them: surface normals, center on centroid, dim nodes outside the selected channel.
+     Below them: center on centroid, dim nodes outside the selected channel.
+   - **POSE** tab: "Show pose vectors" draws the `pose_vectors` of every node. Sensor (SM) and
+     LM channels are switched separately, each with a check box per vector: surface normal and
+     the two curvature directions for SM channels (curvature directions are drawn centred on the
+     node; "Curvature: fully defined only" hides them where `pose_fully_defined` is not set, as
+     they are arbitrary there), the child object's x / y / z axes for LM
+     channels. The **Length** (1–30 % of the object radius) and **Width** (1–8 px) sliders apply to all. Colors match the
+     selected node's pose glyph; vectors of nodes hidden in the legend are hidden too.
 4. Click a node to open the **inspector**: one tab per input channel. Channels store their nodes
    independently, so another channel's tab shows its node at this location: the nearest one
    within the **match radius** (slider; drawn as a sphere around the selected node; far left =
    exact matches only), or none. Then a pose glyph whose camera follows the viewport, and
-   FEATURES / COLOR / DISPLAY tabs: the feature table (click a feature name to color the cloud by
-   it) and, for LM-channel nodes, the coloring and display of the decoded child object in its
+   FEATURES / COLOR / DISPLAY / POSE tabs: the feature table (click a feature name to color the cloud by
+   it) and, for LM-channel nodes, the coloring, display and pose vectors (the same options as the
+   sidebar's POSE tab) of the decoded child object in its
    preview (with its own legend and a ring at `location_rel_model`) and overlay. Also
    "Overlay child in viewport" (stays on while stepping with ‹ / › or ← / →) and
    **Open in LM k →** (the browser Back button returns to the parent graph).
@@ -54,9 +62,17 @@ viewport, and undo, redo, screenshot and the theme move into the top bar's `⋯`
 - Several `model.pt` files can be open at once. **Open model…** (several files can be picked),
   the "Open another model.pt" row and dropping files anywhere add files and make the last one
   active; nothing is replaced. A repeated file name is shown as `model.pt (2)`.
+- A file can be given a memorable name in the app: double-click its name in the **Open files**
+  list, use the pencil button, or press `F2` on the row (`Enter` saves, `Esc` cancels). The name
+  exists only in the browser (the file on disk is untouched) and is what the breadcrumb, the
+  diff slots and the copy menus show. Export suggests that name as the file name; it can still
+  be changed in the export dialog.
 - The sidebar **Open files** list shows each file's graph count, an amber dot for unsaved edits
-  and a close button. Clicking a row switches the LM selector, graph list, breadcrumb, viewport
+  a rename button and a close button. Clicking a row switches the LM selector, graph list, breadcrumb, viewport
   and inspector to that file; each file remembers its own LM and graph.
+- The graph list, the breadcrumb's graph picker and the diff settings list an LM's graphs in
+  natural order (`obj_2` before `obj_10`). This is display only: export keeps each LM's
+  `graph_memory` entry order.
 - Closing a file with unsaved edits asks first; leaving or reloading the page with unsaved edits
   triggers the browser's leave confirmation. A non-blocking warning appears when the graph data
   of all open files exceeds 512 MB.

@@ -1,6 +1,6 @@
 import { useViewerStore, type DisplayOptions as Display } from '../../state/store';
 
-function Toggle({
+export function Toggle({
   label,
   checked,
   onChange,
@@ -40,18 +40,13 @@ function Toggle({
   );
 }
 
-/** Surface normals, centering and channel dimming (point size lives in "Display as"). */
+/** Centering and channel dimming (point size lives in "Display as"). */
 export function DisplayOptions() {
   const display = useViewerStore((s) => s.display);
   const setDisplay = useViewerStore((s) => s.setDisplay);
   const set = (patch: Partial<Display>) => setDisplay(patch);
   return (
     <div>
-      <Toggle
-        label="Show surface normals"
-        checked={display.showNormals}
-        onChange={(v) => set({ showNormals: v })}
-      />
       <Toggle
         label="Center on centroid"
         checked={display.center}

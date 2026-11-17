@@ -12,6 +12,7 @@ import { listScope, multiKeysFor, resolveRowKeys, useEditUi } from '../../state/
 import { LmActionsButton, LmSelector } from './LmSelector';
 import { LoadError } from './LoadError';
 import { OpenFilesList } from './OpenFilesList';
+import { PosePanel } from './PosePanel';
 
 /** Section heading + body; shared by the sidebar sections added in Phases 2, 3 and 5. */
 export function SidebarSection({
@@ -34,15 +35,16 @@ export function SidebarSection({
   );
 }
 
-type StyleTab = 'color' | 'display';
+type StyleTab = 'color' | 'display' | 'pose';
 const STYLE_TABS: { id: StyleTab; label: string }[] = [
   { id: 'color', label: 'Color' },
   { id: 'display', label: 'Display' },
+  { id: 'pose', label: 'Pose' },
 ];
 
 /**
- * COLOR ("Color points by") | DISPLAY ("Display as" and the display toggles) of the displayed
- * graph; mirrors the inspector's COLOR / DISPLAY tabs for the child object.
+ * COLOR ("Color points by") | DISPLAY ("Display as" and the display toggles) | POSE (pose
+ * vectors on every node) of the displayed graph; mirrors the inspector's COLOR / DISPLAY / POSE tabs for the child object.
  */
 function StyleSection() {
   const [tab, setTab] = useState<StyleTab>('color');
@@ -58,6 +60,8 @@ function StyleSection() {
       <TabPanel idPrefix="sidebar-style" id={tab} className="mt-3">
         {tab === 'color' ? (
           <ColorModePanel />
+        ) : tab === 'pose' ? (
+          <PosePanel />
         ) : (
           <>
             <DisplayAsPanel />
@@ -130,7 +134,7 @@ function useDocumentFileDrop() {
 
 /**
  * Left sidebar (272 px): open files (or the drop zone when none is open), LM selector and graph
- * list; color mode and display options as COLOR / DISPLAY tabs. Collapsing only hides it, so the
+ * list; color mode, display options and pose vectors as COLOR / DISPLAY / POSE tabs. Collapsing only hides it, so the
  * document-level drop handler and component state stay alive. `onOpenModel` opens the shared
  * file picker of App (the "+ Open another model.pt" row).
  */

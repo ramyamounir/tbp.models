@@ -20,9 +20,10 @@ export function useChildLook(
 ): ChildLook | undefined {
   const mode = useViewerStore((s) => s.childColorMode);
   const display = useViewerStore((s) => s.childDisplay);
+  const pose = useViewerStore((s) => s.childPose);
   const theme = useThemeColors();
   return useMemo(
-    () => (child ? childLook(model, child, mode, display, theme) : undefined),
-    [model, child, mode, display, theme],
+    () => (child ? childLook(model, child, mode, display, theme, pose) : undefined),
+    [model, child, mode, display, theme, pose],
   );
 }

@@ -11,6 +11,7 @@ import {
   childRadius,
   type ChildLook,
 } from '../../viewer/ChildOverlay';
+import { readPoseColors } from '../../viewer/PoseLayer';
 import { cssToRgb } from '../../viewer/colors';
 import {
   buildLmTriad,
@@ -46,7 +47,7 @@ export type GlyphContent =
   | {
       kind: 'lm';
       row9: readonly number[];
-      /** The child object, drawn as set in the inspector COLOR and DISPLAY tabs. */
+      /** The child object, drawn as set in the inspector COLOR, DISPLAY and POSE tabs. */
       child: { graph: ObjectGraph; look: ChildLook } | null;
       /** The node's `location_rel_model` (child frame): ringed, and the triad is drawn from it. */
       anchor?: Vec3;
@@ -100,7 +101,13 @@ function buildContent(
   let ring: THREE.Points | null = null;
   if (content.child) {
     const { graph: child, look } = content.child;
-    const cloud = buildChildObject(child, look, cssToRgb(readToken('--viewport')));
+    const cloud = buildChildObject(
+      child,
+      look,
+      cssToRgb(readToken('--viewport')),
+      undefined,
+      readPoseColors(),
+    );
     if (cloud) {
       const r = childRadius(child, childCloudPositions(child));
       centerChildCloud(cloud, content.row9, child.centroid, CHILD_PREVIEW_RADIUS / r);

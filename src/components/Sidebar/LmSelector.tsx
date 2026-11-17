@@ -1,3 +1,4 @@
+import { firstGraphId } from '../../model/natsort';
 import { useMemo, useState, type DragEvent } from 'react';
 import { addedLmMarkers } from '../../edit/markers';
 import { addLmAction, duplicateLmAction, editFailed, requestDeleteLm } from '../../state/editUi';
@@ -108,7 +109,7 @@ export function LmSelector() {
               key={lm.lmId}
               type="button"
               aria-pressed={active}
-              onClick={() => selectGraph(lm.lmId, lm.graphIds[0])}
+              onClick={() => selectGraph(lm.lmId, firstGraphId(lm))}
               onDragEnter={(e) => onDragOver(e, lm.lmId)}
               onDragOver={(e) => onDragOver(e, lm.lmId)}
               onDragLeave={() => setDropOver((d) => (d === lm.lmId ? undefined : d))}

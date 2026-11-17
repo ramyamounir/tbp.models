@@ -12,6 +12,7 @@ import {
   lmNodePose,
   placeChildCloud,
 } from '../../viewer/ChildOverlay';
+import { readPoseColors } from '../../viewer/PoseLayer';
 import { cssToRgb, objectIdLabel } from '../../viewer/colors';
 import { disposeObject } from '../../viewer/Glyphs';
 import { useViewer } from '../../viewer/sceneRegistry';
@@ -61,7 +62,7 @@ function AnchorRing() {
 
 /**
  * LM-channel node view: glyph (child triad + posed child preview with its legend and the
- * `location_rel_model` ring), FEATURES / COLOR / DISPLAY tabs (feature table with decoded
+ * `location_rel_model` ring), FEATURES / COLOR / DISPLAY / POSE tabs (feature table with decoded
  * `object_id`; child colors and display), child-overlay toggle and "Open in LM s →" (spec Phase 4
  * "LM feature table", "Child overlay", "Ambiguous child ids").
  */
@@ -122,7 +123,13 @@ export function LmPanel({
   // `look` changes one frame after a theme change (useThemeColors), so --viewport is current.
   useEffect(() => {
     if (!viewer || !overlayChild || !child || !pose || !look) return;
-    const obj = buildChildObject(child, look, cssToRgb(readToken('--viewport')));
+    const obj = buildChildObject(
+      child,
+      look,
+      cssToRgb(readToken('--viewport')),
+      undefined,
+      readPoseColors(),
+    );
     if (!obj) return;
     placeChildCloud(obj, pose, child.centroid);
     viewer.overlayGroup.add(obj);
