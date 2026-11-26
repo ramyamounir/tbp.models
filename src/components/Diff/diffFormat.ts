@@ -4,7 +4,6 @@
  */
 import type { PropertyResult } from '../../diff/compare';
 import { formatMm } from '../Inspector/activeNode';
-import { fmt } from '../Inspector/format';
 
 export const iconProps = {
   width: 14,
@@ -18,18 +17,30 @@ export const iconProps = {
   'aria-hidden': true,
 };
 
-/** A delta (or tolerance) in a property's unit: `3.1 % R`, `1.4 mm`, `12.4°`, `0.18`. */
+/**
+ * `v` with `digits` decimals, or in exponential notation (`6.3e-16`) when it is non-zero but
+ * would round to zero, so a tiny difference never reads as `0.0`.
+ */
+export function fixedOrExp(v: number, digits: number): string {
+  if (v !== 0 && Math.abs(v) < 0.5 * 10 ** -digits) return v.toExponential(1);
+  return v.toFixed(digits);
+}
+
+/**
+ * A delta (or tolerance) in a property's unit: `3.1 % R`, `1.4 mm`, `12.4°`, `0.18`; a tiny
+ * non-zero one in exponential notation (`6.3e-14 % R`, `6.3e-16 m`, `1.4e-13`).
+ */
 export function formatDelta(v: number, unit: PropertyResult['unit']): string {
   if (!Number.isFinite(v)) return v === Infinity ? '∞' : '—';
   switch (unit) {
     case '%R':
-      return `${v.toFixed(1)} % R`;
+      return `${fixedOrExp(v, 1)} % R`;
     case 'm':
-      return formatMm(v);
+      return v !== 0 && Math.abs(v) < 5e-5 ? `${v.toExponential(1)} m` : formatMm(v);
     case '°':
-      return `${v.toFixed(1)}°`;
+      return `${fixedOrExp(v, 1)}°`;
     default:
-      return fmt(v, v !== 0 && Math.abs(v) < 0.01 ? 4 : 2);
+      return fixedOrExp(v, v !== 0 && Math.abs(v) < 0.01 ? 4 : 2);
   }
 }
 

@@ -140,6 +140,29 @@ function absDiff(a: number, b: number): number {
 
 const RAD2DEG = 180 / Math.PI;
 
+/**
+ * Angle (degrees) between two 3-vectors: 0 when both are zero, 180 when only one is. Computed as
+ * atan2(|a×b|, a·b), which is exactly 0 for identical vectors and accurate for tiny angles (an
+ * acos of the normalized dot product reads one-ulp rounding of the cosine as ~1e-6°).
+ */
+export function vectorAngleDeg(
+  ax: number,
+  ay: number,
+  az: number,
+  bx: number,
+  by: number,
+  bz: number,
+): number {
+  const zeroA = ax === 0 && ay === 0 && az === 0;
+  const zeroB = bx === 0 && by === 0 && bz === 0;
+  if (zeroA && zeroB) return 0;
+  if (zeroA || zeroB) return 180;
+  const cx = ay * bz - az * by;
+  const cy = az * bx - ax * bz;
+  const cz = ax * by - ay * bx;
+  return Math.atan2(Math.hypot(cx, cy, cz), ax * bx + ay * by + az * bz) * RAD2DEG;
+}
+
 /** Largest angle (degrees) between corresponding 3-vectors of two rows. */
 function poseDelta(xa: Float64Array, ia: number, xb: Float64Array, ib: number, w: number): number {
   let worst = 0;
@@ -179,15 +202,7 @@ function poseDelta(xa: Float64Array, ia: number, xb: Float64Array, ib: number, w
         bz = 0;
       }
     }
-    const na = Math.hypot(ax, ay, az);
-    const nb = Math.hypot(bx, by, bz);
-    let deg: number;
-    if (na === 0 && nb === 0) deg = 0;
-    else if (na === 0 || nb === 0) deg = 180;
-    else {
-      const cos = (ax * bx + ay * by + az * bz) / (na * nb);
-      deg = Math.acos(Math.max(-1, Math.min(1, cos))) * RAD2DEG;
-    }
+    const deg = vectorAngleDeg(ax, ay, az, bx, by, bz);
     if (deg > worst) worst = deg;
   }
   return worst;
@@ -281,7 +296,9 @@ export function diffChannels(
   const tolM = degenerate ? EXACT_EPS_M : Math.max((s.positionPct / 100) * R, EXACT_EPS_M);
   const cellSize = Math.max(tolM, degenerate ? 0 : R / 64);
   const posUnit: '%R' | 'm' = degenerate ? 'm' : '%R';
-  const posTol = degenerate ? EXACT_EPS_M : s.positionPct;
+  // A 0 % position tolerance is exact: any non-zero offset of a pair is a difference.
+  const exactPos = s.positionPct === 0;
+  const posTol = exactPos ? 0 : degenerate ? EXACT_EPS_M : s.positionPct;
   const posScale = degenerate ? 1 : 100 / R; // metres → reporting unit
   const offA: Vec3 = s.alignCentroids ? channelCentroid(ca) : [0, 0, 0];
   const offB: Vec3 = s.alignCentroids ? channelCentroid(cb) : [0, 0, 0];
@@ -376,8 +393,9 @@ export function diffChannels(
         d = positionDelta(ca, i, offA, cb, j, offB, posScale);
         // Nearest-in-space pairs are within the position tolerance by construction; keep a
         // rounding difference between the pairing distance and this one (or the exact-match
-        // epsilon at a 0 % tolerance) from flagging such a pair as changed.
-        if (s.match === 'nearest' && d > col.acc.tol && Number.isFinite(d)) d = col.acc.tol;
+        // epsilon) from flagging such a pair as changed. Not at a 0 % tolerance: that one is exact.
+        if (s.match === 'nearest' && !exactPos && d > col.acc.tol && Number.isFinite(d))
+          d = col.acc.tol;
       } else {
         const ia = i * ca.F + col.startA;
         const ib = j * cb.F + col.startB;

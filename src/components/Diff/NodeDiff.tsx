@@ -9,7 +9,12 @@
  * (`featureValues`) or `Map`s, keyed by `featureKey(name)`.
  */
 import { useMemo, type ReactNode } from 'react';
-import { channelFeatureNames, type DiffResult, type PropertyResult } from '../../diff/compare';
+import {
+  channelFeatureNames,
+  vectorAngleDeg,
+  type DiffResult,
+  type PropertyResult,
+} from '../../diff/compare';
 import { featureKey, type DiffPropertyKey } from '../../diff/settings';
 import type { ResolvedSlot } from '../../diff/useDiff';
 import {
@@ -85,13 +90,10 @@ function colorSwatch(v: ArrayLike<number> | undefined, kind: 'hsv' | 'rgba'): Re
 
 /** Angle (degrees) between two 3-vectors; 180 when exactly one is zero-length, NaN if non-finite. */
 function angleDeg(a: ArrayLike<number>, b: ArrayLike<number>): number {
-  const na = Math.hypot(a[0], a[1], a[2]);
-  const nb = Math.hypot(b[0], b[1], b[2]);
-  if (!Number.isFinite(na) || !Number.isFinite(nb)) return NaN;
-  if (na === 0 && nb === 0) return 0;
-  if (na === 0 || nb === 0) return 180;
-  const cos = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (na * nb);
-  return (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI;
+  const ok = (v: ArrayLike<number>) =>
+    Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2]);
+  if (!ok(a) || !ok(b)) return NaN;
+  return vectorAngleDeg(a[0], a[1], a[2], b[0], b[1], b[2]);
 }
 
 function objectIdText(r: ResolvedSlot, channel: string, v: ArrayLike<number> | undefined) {
@@ -258,7 +260,7 @@ export function NodeDiff({
         const d = angleDeg(ga.slice(3 * k, 3 * k + 3), gb.slice(3 * k, 3 * k + 3));
         if (Number.isFinite(d) && d > best) {
           best = d;
-          worst = { row: k, text: `${d.toFixed(1)}°` };
+          worst = { row: k, text: formatDelta(d, '°') };
         }
       }
       if (best <= 0) worst = undefined;

@@ -11,7 +11,7 @@ export interface PropertyTolerance {
   enabled: boolean;
   tol: number;
 }
-export type PresetName = 'strict' | 'default' | 'loose';
+export type PresetName = 'exact' | 'strict' | 'default' | 'loose';
 
 export interface DiffSettings {
   match: MatchMode;
@@ -55,9 +55,10 @@ function preset(
   poseDeg: number,
   hsv: number,
   other: number,
+  match: MatchMode = 'nearest',
 ): DiffSettings {
   return {
-    match: 'nearest',
+    match,
     alignCentroids: false,
     positionPct,
     positionEnabled: true,
@@ -70,8 +71,13 @@ function preset(
   };
 }
 
-/** Requirements "Diff settings" tolerance table. Each preset has its own `features` map. */
+/**
+ * Requirements "Diff settings" tolerance table. Each preset has its own `features` map.
+ * 'exact' is the bit-identical check: rows paired by index and every value compared with
+ * tolerance 0 (only NaN equals NaN and -0 equals 0), as `diffmodels` does by default.
+ */
 export const PRESETS: Record<PresetName, DiffSettings> = {
+  exact: preset('exact', 0, 0, 0, 0, 'index'),
   strict: preset('strict', 0.5, 1, 0.01, 0.01),
   default: preset('default', 2.0, 5, 0.05, 0.1),
   loose: preset('loose', 5.0, 15, 0.15, 0.5),
@@ -80,11 +86,13 @@ export const PRESETS: Record<PresetName, DiffSettings> = {
 export const DEFAULT_DIFF_SETTINGS: DiffSettings = PRESETS.default;
 
 /**
- * The tolerance fields of `preset` applied to `s`: matching mode and centroid alignment are not
- * part of a preset and are kept (the table's Strict / Default / Loose control fills the table).
+ * The tolerance fields of `preset` applied to `s`. Strict / Default / Loose keep the matching
+ * mode and centroid alignment of `s`; Exact also sets them (index pairing, no alignment), since a
+ * bit-identical comparison is about the stored rows as they are.
  */
 export function applyPreset(s: DiffSettings, name: PresetName): DiffSettings {
   const p = PRESETS[name];
+  if (name === 'exact') return { ...p, features: presetFeatures() };
   return { ...p, match: s.match, alignCentroids: s.alignCentroids, features: presetFeatures() };
 }
 
@@ -153,6 +161,7 @@ export function patchDiffSettings(prev: DiffSettings, patch: Partial<DiffSetting
     (k) => k !== 'preset' && !sameField(prev[k], next[k]),
   );
   const named =
+    patch.preset === 'exact' ||
     patch.preset === 'strict' ||
     patch.preset === 'default' ||
     patch.preset === 'loose' ||

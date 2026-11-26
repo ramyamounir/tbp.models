@@ -382,7 +382,12 @@ function orderFeatures(names: Iterable<string>): string[] {
   return [...first, ...rest, ...(all.includes('object_id') ? ['object_id'] : [])];
 }
 
-const PRESET_NAMES: { name: PresetName; label: string }[] = [
+const PRESET_NAMES: { name: PresetName; label: string; hint?: string }[] = [
+  {
+    name: 'exact',
+    label: 'Exact',
+    hint: 'Bit-identical: pairs rows by index and compares every value with tolerance 0',
+  },
   { name: 'strict', label: 'Strict' },
   { name: 'default', label: 'Default' },
   { name: 'loose', label: 'Loose' },
@@ -602,6 +607,7 @@ export function DiffSettingsDialog() {
                     type="button"
                     role="radio"
                     aria-checked={on}
+                    title={p.hint}
                     onClick={() => setDraft((d) => applyPreset(d, p.name))}
                     className={`h-6 rounded px-3 text-[12px] ${
                       on
