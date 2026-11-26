@@ -16,12 +16,21 @@ export type PresetName = 'exact' | 'strict' | 'default' | 'loose';
 export interface DiffSettings {
   match: MatchMode;
   alignCentroids: boolean;
-  /** % of the bounding radius R of A's channel. */
+  /**
+   * 'nearest' mode only: an A node pairs with the closest unpaired B node at most this far away,
+   * in % of the bounding radius R of A's channel; 0 pairs only nodes at exactly the same position.
+   * Part of node matching, not of the tolerance presets.
+   */
+  pairingPct: number;
+  /**
+   * Tolerance of the 'position' property of a pair, in % of R: like any other feature, it only
+   * decides whether a paired node counts as changed.
+   */
   positionPct: number;
   /**
-   * false: node position is left out of the comparison (no 'position' property; in 'nearest'
-   * mode pairing still uses `positionPct`). Not in the spec's type; the settings table has an
-   * enable checkbox on every row (requirements "Each property has a checkbox").
+   * false: node position is left out of the comparison (no 'position' property; pairing still
+   * uses `pairingPct`). Not in the spec's type; the settings table has an enable checkbox on
+   * every row (requirements "Each property has a checkbox").
    */
   positionEnabled: boolean;
   poseVectorsDeg: PropertyTolerance;
@@ -36,6 +45,7 @@ export interface DiffSettings {
 
 /** Slider ranges of the settings table (position matches the inspector's MATCH_RADIUS_MAX). */
 export const DIFF_RANGES = {
+  pairingPct: [0, 10],
   positionPct: [0, 10],
   poseVectorsDeg: [0, 45],
   hsv: [0, 0.5],
@@ -49,17 +59,20 @@ function presetFeatures(): ReadonlyMap<string, PropertyTolerance> {
   return new Map(EXACT_FEATURES.map((n) => [n, { enabled: true, tol: 0 }]));
 }
 
+/** Pairing distance of a new comparison (% of R). */
+export const DEFAULT_PAIRING_PCT = 2.0;
+
 function preset(
   name: PresetName,
   positionPct: number,
   poseDeg: number,
   hsv: number,
   other: number,
-  match: MatchMode = 'nearest',
 ): DiffSettings {
   return {
-    match,
+    match: 'nearest',
     alignCentroids: false,
+    pairingPct: DEFAULT_PAIRING_PCT,
     positionPct,
     positionEnabled: true,
     poseVectorsDeg: { enabled: true, tol: poseDeg },
@@ -73,11 +86,12 @@ function preset(
 
 /**
  * Requirements "Diff settings" tolerance table. Each preset has its own `features` map.
- * 'exact' is the bit-identical check: rows paired by index and every value compared with
- * tolerance 0 (only NaN equals NaN and -0 equals 0), as `diffmodels` does by default.
+ * 'exact' is the bit-identical check: every value compared with tolerance 0 (only NaN equals
+ * NaN and -0 equals 0). The pairing distance is not part of a preset: a moved node within it is
+ * a changed pair, beyond it only-A / only-B.
  */
 export const PRESETS: Record<PresetName, DiffSettings> = {
-  exact: preset('exact', 0, 0, 0, 0, 'index'),
+  exact: preset('exact', 0, 0, 0, 0),
   strict: preset('strict', 0.5, 1, 0.01, 0.01),
   default: preset('default', 2.0, 5, 0.05, 0.1),
   loose: preset('loose', 5.0, 15, 0.15, 0.5),
@@ -86,14 +100,19 @@ export const PRESETS: Record<PresetName, DiffSettings> = {
 export const DEFAULT_DIFF_SETTINGS: DiffSettings = PRESETS.default;
 
 /**
- * The tolerance fields of `preset` applied to `s`. Strict / Default / Loose keep the matching
- * mode and centroid alignment of `s`; Exact also sets them (index pairing, no alignment), since a
- * bit-identical comparison is about the stored rows as they are.
+ * The tolerance fields of `preset` applied to `s`: node matching (mode, centroid alignment and
+ * pairing distance) is not part of a preset and is kept (the table's Exact / Strict / Default /
+ * Loose control fills the table).
  */
 export function applyPreset(s: DiffSettings, name: PresetName): DiffSettings {
   const p = PRESETS[name];
-  if (name === 'exact') return { ...p, features: presetFeatures() };
-  return { ...p, match: s.match, alignCentroids: s.alignCentroids, features: presetFeatures() };
+  return {
+    ...p,
+    match: s.match,
+    alignCentroids: s.alignCentroids,
+    pairingPct: s.pairingPct,
+    features: presetFeatures(),
+  };
 }
 
 /** Identifies one compared property; feature keys are prefixed so no feature name can collide. */
@@ -128,17 +147,26 @@ function patchTol(
   return { enabled: !!next.enabled, tol: clamp(next.tol, range, prev.tol) };
 }
 
+/** Node matching settings: not part of a tolerance preset, so changing one keeps the preset. */
+export const MATCHING_FIELDS: ReadonlySet<keyof DiffSettings> = new Set([
+  'match',
+  'alignCentroids',
+  'pairingPct',
+]);
+
 /**
  * `prev` patched with `patch` (store `setDiffSettings`): numbers clamped to their slider ranges
  * (an invalid number keeps the previous value). A patch that names `preset` keeps it (applying
- * a preset or "Reset to defaults"); any other change sets `preset: 'custom'`. Returns `prev`
- * itself when nothing changed, so the comparison does not re-run.
+ * a preset or "Reset to defaults"); any other tolerance change sets `preset: 'custom'`, a change
+ * of node matching (`MATCHING_FIELDS`) keeps the preset. Returns `prev` itself when nothing
+ * changed, so the comparison does not re-run.
  */
 export function patchDiffSettings(prev: DiffSettings, patch: Partial<DiffSettings>): DiffSettings {
   const next: DiffSettings = {
     match: patch.match === 'nearest' || patch.match === 'index' ? patch.match : prev.match,
     alignCentroids:
       patch.alignCentroids === undefined ? prev.alignCentroids : !!patch.alignCentroids,
+    pairingPct: clamp(patch.pairingPct ?? prev.pairingPct, DIFF_RANGES.pairingPct, prev.pairingPct),
     positionPct: clamp(
       patch.positionPct ?? prev.positionPct,
       DIFF_RANGES.positionPct,
@@ -157,9 +185,11 @@ export function patchDiffSettings(prev: DiffSettings, patch: Partial<DiffSetting
     ),
     preset: prev.preset,
   };
-  const changed = (Object.keys(next) as (keyof DiffSettings)[]).some(
+  const differs = (Object.keys(next) as (keyof DiffSettings)[]).filter(
     (k) => k !== 'preset' && !sameField(prev[k], next[k]),
   );
+  const changed = differs.length > 0;
+  const tolChanged = differs.some((k) => !MATCHING_FIELDS.has(k));
   const named =
     patch.preset === 'exact' ||
     patch.preset === 'strict' ||
@@ -167,7 +197,7 @@ export function patchDiffSettings(prev: DiffSettings, patch: Partial<DiffSetting
     patch.preset === 'loose' ||
     patch.preset === 'custom';
   if (named) next.preset = patch.preset!;
-  else if (changed) next.preset = 'custom';
+  else if (tolChanged) next.preset = 'custom';
   if (!changed && next.preset === prev.preset) return prev;
   return next;
 }

@@ -13,6 +13,7 @@ import { featureStructure, type FeatureStructure } from '../../diff/compare';
 import { channelRadius } from '../../diff/match';
 import {
   applyPreset,
+  DEFAULT_PAIRING_PCT,
   DIFF_RANGES,
   EXACT_FEATURES,
   featureKey,
@@ -382,11 +383,95 @@ function orderFeatures(names: Iterable<string>): string[] {
   return [...first, ...rest, ...(all.includes('object_id') ? ['object_id'] : [])];
 }
 
+const PAIRING_CHOICES = [
+  { label: 'Exact', value: 0, hint: 'Pairs only nodes at exactly the same position' },
+  {
+    label: 'Default',
+    value: DEFAULT_PAIRING_PCT,
+    hint: `${DEFAULT_PAIRING_PCT.toFixed(1)} % of R`,
+  },
+] as const;
+
+/**
+ * Pairing distance of 'nearest' matching: Exact / Default shortcuts, a number field and a slider
+ * (% of R), with the distance in millimetres of A's channel.
+ */
+function PairingDistance({
+  value,
+  disabled,
+  hint,
+  onChange,
+}: {
+  value: number;
+  disabled: boolean;
+  hint: string;
+  onChange(v: number): void;
+}) {
+  const [lo, hi] = DIFF_RANGES.pairingPct;
+  return (
+    <div
+      role="group"
+      aria-label="Pairing distance"
+      className={`mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 pl-6 ${disabled ? 'opacity-50' : ''}`}
+    >
+      <span className="text-[12px] text-text">Pairing distance</span>
+      <div
+        role="radiogroup"
+        aria-label="Pairing distance shortcut"
+        className="flex gap-0.5 rounded-md border border-border bg-bg p-0.5"
+      >
+        {PAIRING_CHOICES.map((c) => {
+          const on = value === c.value;
+          return (
+            <button
+              key={c.label}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              title={c.hint}
+              disabled={disabled}
+              onClick={() => onChange(c.value)}
+              className={`h-6 rounded px-3 text-[12px] disabled:cursor-not-allowed ${
+                on ? 'bg-panel font-semibold text-text shadow-sm' : 'text-muted hover:text-text'
+              }`}
+            >
+              {c.label}
+            </button>
+          );
+        })}
+      </div>
+      <NumberField
+        value={value}
+        min={lo}
+        max={hi}
+        step={0.1}
+        disabled={disabled}
+        label="Pairing distance in % of R"
+        onCommit={onChange}
+      />
+      <span className="text-[11px] text-muted">% of R</span>
+      <input
+        type="range"
+        aria-hidden="true"
+        tabIndex={-1}
+        min={lo}
+        max={hi}
+        step={0.1}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.currentTarget.value))}
+        className="h-1 min-w-[80px] flex-1 accent-[var(--accent)]"
+      />
+      <span className="w-[64px] shrink-0 text-right text-[11px] text-faint">{hint}</span>
+    </div>
+  );
+}
+
 const PRESET_NAMES: { name: PresetName; label: string; hint?: string }[] = [
   {
     name: 'exact',
     label: 'Exact',
-    hint: 'Bit-identical: pairs rows by index and compares every value with tolerance 0',
+    hint: 'Bit-identical: every value compared with tolerance 0, with either node matching',
   },
   { name: 'strict', label: 'Strict' },
   { name: 'default', label: 'Default' },
@@ -417,6 +502,10 @@ export function DiffSettingsDialog() {
   /** Edit of the draft: any change other than a preset makes it 'custom'. */
   const edit = (patch: Partial<DiffSettings>) =>
     setDraft((d) => ({ ...d, ...patch, preset: 'custom' }));
+  /** Edit of node matching: not part of a preset, so the preset is kept. */
+  const editMatching = (
+    patch: Pick<Partial<DiffSettings>, 'match' | 'alignCentroids' | 'pairingPct'>,
+  ) => setDraft((d) => ({ ...d, ...patch }));
 
   const setFeature = (name: string, t: PropertyTolerance) => {
     if (name === 'pose_vectors') edit({ poseVectorsDeg: t });
@@ -424,6 +513,14 @@ export function DiffSettingsDialog() {
     else if (name === 'object_id') edit({ objectId: { enabled: t.enabled } });
     else edit({ features: new Map(draft.features).set(name, t) });
   };
+
+  /** A distance in % of R in millimetres of A's channel; 'exact' at 0 or for a point-like channel. */
+  const mmHint = (pct: number) =>
+    pct === 0 || (channelA && radius < 1e-9)
+      ? 'exact'
+      : channelA
+        ? `≈ ${formatMm((pct / 100) * radius)}`
+        : '';
 
   const rows: RowSpec[] = [
     {
@@ -438,10 +535,7 @@ export function DiffSettingsDialog() {
         step: 0.1,
         unit: '% of R',
         onChange: (v) => edit({ positionPct: v }),
-        after:
-          channelA && radius >= 1e-9
-            ? `≈ ${formatMm((draft.positionPct / 100) * radius)}`
-            : 'exact',
+        after: mmHint(draft.positionPct),
       },
     },
   ];
@@ -552,7 +646,7 @@ export function DiffSettingsDialog() {
                 [
                   'nearest',
                   'Nearest node in space',
-                  'Pairs each A node with the closest B node within the position tolerance',
+                  'Pairs each A node with the closest B node within the pairing distance',
                 ],
                 ['index', 'Same row index', 'Pairs row i of A with row i of B (same training run)'],
               ] as const
@@ -562,7 +656,7 @@ export function DiffSettingsDialog() {
                   type="radio"
                   name="diff-match"
                   checked={draft.match === mode}
-                  onChange={() => edit({ match: mode })}
+                  onChange={() => editMatching({ match: mode })}
                   className="mt-0.5 accent-[var(--accent)]"
                 />
                 <span>
@@ -571,16 +665,22 @@ export function DiffSettingsDialog() {
                 </span>
               </label>
             ))}
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={draft.alignCentroids}
-                onChange={(e) => edit({ alignCentroids: e.currentTarget.checked })}
-                className="accent-[var(--accent)]"
-              />
-              <span className="text-[13px] text-text">Align centroids before matching</span>
-            </label>
           </div>
+          <PairingDistance
+            value={draft.pairingPct}
+            disabled={draft.match !== 'nearest'}
+            hint={mmHint(draft.pairingPct)}
+            onChange={(v) => editMatching({ pairingPct: v })}
+          />
+          <label className="mt-3 flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={draft.alignCentroids}
+              onChange={(e) => editMatching({ alignCentroids: e.currentTarget.checked })}
+              className="accent-[var(--accent)]"
+            />
+            <span className="text-[13px] text-text">Align centroids before matching</span>
+          </label>
         </section>
 
         <section aria-labelledby="diff-equal-within" className="border-t border-border pt-4">

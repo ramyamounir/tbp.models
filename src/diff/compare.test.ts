@@ -83,42 +83,98 @@ describe('zero tolerances', () => {
     expect(changedOf(PRESETS.exact, a, b)).toBe(0);
   });
 
-  it('flag a one-ulp position offset in nearest mode at 0 %', () => {
+  it('flag a one-ulp position offset of a nearest pair at a 0 % position tolerance', () => {
     const a = channel(POS, poseRows());
     const b = channel(ulpMoved(), poseRows());
     expect(changedOf(PRESETS.default, a, b)).toBe(0);
     const r = diffChannels(a, file, b, file, ZERO_NEAREST);
+    expect(r.counts).toMatchObject({ equal: 2, changed: 1, onlyA: 0, onlyB: 0 });
+    expect(r.changedMask.get('position')![1]).toBe(1);
+  });
+
+  it('pair only coincident nodes at a 0 % pairing distance', () => {
+    const a = channel(POS, poseRows());
+    const b = channel(ulpMoved(), poseRows());
+    const r = diffChannels(a, file, b, file, { ...ZERO_NEAREST, pairingPct: 0 });
+    expect(r.counts).toMatchObject({ equal: 2, changed: 0, onlyA: 1, onlyB: 1 });
+    expect(r.tolM).toBe(0);
+  });
+
+  it('flag a pair beyond the position tolerance but within the pairing distance', () => {
+    const moved = POS.map((r) => [...r]);
+    moved[1][0] += 0.01;
+    const s = { ...PRESETS.default, pairingPct: 10, positionPct: 0.5 };
+    const r = diffChannels(channel(POS, poseRows()), file, channel(moved, poseRows()), file, s);
+    expect(r.counts).toMatchObject({ changed: 1, onlyA: 0, onlyB: 0 });
+    expect(r.histogram.tol).toBe(10);
+  });
+
+  it('flag a one-ulp position offset in index mode at 0 %', () => {
+    const a = channel(POS, poseRows());
+    const b = channel(ulpMoved(), poseRows());
+    const r = diffChannels(a, file, b, file, { ...ZERO_NEAREST, match: 'index' });
     expect(r.counts.changed).toBe(1);
     expect(r.properties.find((p) => p.key === 'position')!.max).toBeGreaterThan(0);
   });
 
-  it('flag a one-ulp position offset and a one-ulp feature change with the exact preset', () => {
-    const a = channel(POS, poseRows());
-    expect(changedOf(PRESETS.exact, a, channel(ulpMoved(), poseRows()))).toBe(1);
+  it('flag a one-ulp feature change with the exact preset', () => {
     const pose = poseRows();
     pose[2][4] += Number.EPSILON;
-    expect(changedOf(PRESETS.exact, a, channel(POS, pose))).toBe(1);
+    expect(changedOf(PRESETS.exact, channel(POS, poseRows()), channel(POS, pose))).toBe(1);
+  });
+
+  it('pair coincident nodes when every node sits at one point', () => {
+    const one = [
+      [0.5, 0.5, 0.5],
+      [0.5, 0.5, 0.5],
+    ];
+    const pose = one.map(() => [...POSE]);
+    const r = diffChannels(channel(one, pose), file, channel(one, pose), file, PRESETS.exact);
+    expect(r.counts).toMatchObject({ equal: 2, changed: 0, onlyA: 0, onlyB: 0 });
   });
 });
 
 describe('exact preset', () => {
-  it('pairs by index with every tolerance 0', () => {
-    const s = applyPreset({ ...PRESETS.default, match: 'nearest', alignCentroids: true }, 'exact');
-    expect(s).toMatchObject({
-      preset: 'exact',
-      match: 'index',
-      alignCentroids: false,
-      positionPct: 0,
-      defaultFeatureTol: 0,
-      poseVectorsDeg: { enabled: true, tol: 0 },
-      hsv: { enabled: true, tol: 0 },
-    });
+  it('sets every tolerance to 0 and keeps the matching mode', () => {
+    for (const match of ['nearest', 'index'] as const) {
+      const s = applyPreset({ ...PRESETS.default, match, alignCentroids: true }, 'exact');
+      expect(s).toMatchObject({
+        preset: 'exact',
+        match,
+        alignCentroids: true,
+        positionPct: 0,
+        defaultFeatureTol: 0,
+        poseVectorsDeg: { enabled: true, tol: 0 },
+        hsv: { enabled: true, tol: 0 },
+      });
+    }
   });
 
-  it('leaves the matching mode to the other presets', () => {
-    const s = applyPreset(PRESETS.exact, 'default');
-    expect(s.match).toBe('index');
-    expect(s.positionPct).toBe(PRESETS.default.positionPct);
+  it('flags a one-ulp move as a changed pair with either matching mode', () => {
+    const a = channel(POS, poseRows());
+    const b = channel(ulpMoved(), poseRows());
+    const nearest = diffChannels(a, file, b, file, PRESETS.exact).counts;
+    const index = diffChannels(a, file, b, file, { ...PRESETS.exact, match: 'index' }).counts;
+    expect(nearest).toMatchObject({ changed: 1, onlyA: 0, onlyB: 0 });
+    expect(index).toMatchObject({ changed: 1, onlyA: 0, onlyB: 0 });
+  });
+
+  it('keeps the pairing distance', () => {
+    expect(applyPreset({ ...PRESETS.default, pairingPct: 7 }, 'exact').pairingPct).toBe(7);
+  });
+
+  it('is not turned custom by node matching changes', () => {
+    const s = applyPreset(PRESETS.default, 'exact');
+    for (const patch of [
+      { pairingPct: 0 },
+      { match: 'index' as const },
+      { alignCentroids: true },
+    ]) {
+      const next = patchDiffSettings(s, patch);
+      expect(next).not.toBe(s);
+      expect(next.preset).toBe('exact');
+    }
+    expect(patchDiffSettings(s, { pairingPct: 0, positionPct: 1 }).preset).toBe('custom');
   });
 
   it('is kept by patchDiffSettings when named', () => {

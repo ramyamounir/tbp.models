@@ -320,7 +320,7 @@ class KdTree {
 
 /**
  * Pairs the nodes of channel `a` with those of channel `b`. Positions are compared as
- * `posA - offA` against `posB - offB`. `tolM` is the position tolerance in metres; `cellSize`
+ * `posA - offA` against `posB - offB`. `tolM` is the pairing distance in metres; `cellSize`
  * (>= tolM, `diffGraphs` passes `max(tolM, R / 64)`) is the grid cell size for 'nearest'.
  */
 export function matchChannel(

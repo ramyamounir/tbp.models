@@ -62,7 +62,7 @@ function SingleSlot({ slot, resolved }: { slot: Slot; resolved: ResolvedSlot }) 
   );
 }
 
-/** The 16-bin distance histogram with the tolerance marker. */
+/** The 16-bin distance histogram with the pairing distance (or, index mode, tolerance) marker. */
 function HistogramSection({ result, indexMode }: { result: DiffResult; indexMode: boolean }) {
   const h = result.histogram;
   const peak = Math.max(1, ...h.bins);
@@ -105,7 +105,7 @@ function HistogramSection({ result, indexMode }: { result: DiffResult; indexMode
               : { left: `${tolFrac * 100}%` }
           }
         >
-          tol {fmtU(h.tol)}
+          {indexMode ? 'tol' : 'pairing'} {fmtU(h.tol)}
         </span>
       </div>
       <div className="mt-1 flex justify-between font-mono text-[10px] text-faint">

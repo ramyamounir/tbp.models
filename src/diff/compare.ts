@@ -66,12 +66,13 @@ export interface DiffResult {
   properties: PropertyResult[];
   /**
    * nearestA as % of R (metres when R < 1e-9): 16 bins over [0, max] with
-   * max = max(2 * tol, p99); finite values only; values above max go in the last bin.
+   * max = max(2 * tol, p99); finite values only; values above max go in the last bin. `tol` is
+   * the pairing distance in 'nearest' mode, the position tolerance in 'index' mode.
    */
   histogram: { bins: number[]; max: number; tol: number; unit: '%R' | 'm' };
   /** Every feature of either channel, in the order of `properties` (without 'position'). */
   structure: FeatureStructure[];
-  /** Bounding radius R of A's channel (metres) and the position tolerance in metres. */
+  /** Bounding radius R of A's channel (metres) and the pairing distance in metres. */
   radius: number;
   tolM: number;
 }
@@ -293,12 +294,20 @@ export function diffChannels(
 ): DiffResult {
   const R = channelRadius(ca);
   const degenerate = !(R >= DEGENERATE_RADIUS_M);
-  const tolM = degenerate ? EXACT_EPS_M : Math.max((s.positionPct / 100) * R, EXACT_EPS_M);
-  const cellSize = Math.max(tolM, degenerate ? 0 : R / 64);
+  // Pairing distance ('nearest' mode) in metres: 0 pairs only coincident nodes.
+  const tolM =
+    s.pairingPct === 0
+      ? 0
+      : degenerate
+        ? EXACT_EPS_M
+        : Math.max((s.pairingPct / 100) * R, EXACT_EPS_M);
+  // The grid cell size must stay positive even when the pairing distance is 0.
+  const cellSize = Math.max(tolM, degenerate ? EXACT_EPS_M : R / 64);
   const posUnit: '%R' | 'm' = degenerate ? 'm' : '%R';
-  // A 0 % position tolerance is exact: any non-zero offset of a pair is a difference.
-  const exactPos = s.positionPct === 0;
-  const posTol = exactPos ? 0 : degenerate ? EXACT_EPS_M : s.positionPct;
+  // Position tolerance of a pair, in the reporting unit: 0 is exact.
+  const posTol = s.positionPct === 0 ? 0 : degenerate ? EXACT_EPS_M : s.positionPct;
+  // The histogram shows the pairing distance in 'nearest' mode, the position tolerance in 'index'.
+  const histTol = s.match === 'nearest' ? (degenerate ? tolM : s.pairingPct) : posTol;
   const posScale = degenerate ? 1 : 100 / R; // metres → reporting unit
   const offA: Vec3 = s.alignCentroids ? channelCentroid(ca) : [0, 0, 0];
   const offB: Vec3 = s.alignCentroids ? channelCentroid(cb) : [0, 0, 0];
@@ -391,11 +400,6 @@ export function diffChannels(
       let d: number;
       if (col.metric === 'position') {
         d = positionDelta(ca, i, offA, cb, j, offB, posScale);
-        // Nearest-in-space pairs are within the position tolerance by construction; keep a
-        // rounding difference between the pairing distance and this one (or the exact-match
-        // epsilon) from flagging such a pair as changed. Not at a 0 % tolerance: that one is exact.
-        if (s.match === 'nearest' && !exactPos && d > col.acc.tol && Number.isFinite(d))
-          d = col.acc.tol;
       } else {
         const ia = i * ca.F + col.startA;
         const ib = j * cb.F + col.startB;
@@ -464,7 +468,7 @@ export function diffChannels(
     changedMask,
     counts,
     properties,
-    histogram: histogram(histValues, posTol, posUnit),
+    histogram: histogram(histValues, histTol, posUnit),
     structure,
     radius: R,
     tolM,
